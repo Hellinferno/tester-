@@ -4,7 +4,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUp, ImageIcon, Loader2, Mic, Sparkles, X } from 'lucide-react';
 import { Sidebar } from '../components/Sidebar';
 import { RunSettings } from '../components/RunSettings';
-import { BenchmarkPanel } from '../components/BenchmarkPanel/BenchmarkPanel';
 import { SystemInstructionEditor } from '../components/SystemInstructionEditor/SystemInstructionEditor';
 import { AnalysisPanel } from '../components/AnalysisPanel/AnalysisPanel';
 import { ModelSelector } from '../components/ModelSelector/ModelSelector';
@@ -336,7 +335,6 @@ export default function StudioPage() {
           <section className="min-w-0 flex-1 overflow-y-auto bg-studio-canvas">
             <div className="mx-auto max-w-5xl px-6 py-8">
               {activeTab === 'system-instructions' && <SystemInstructionEditor />}
-              {activeTab === 'benchmark' && <BenchmarkPanel />}
               {activeTab === 'analytics' && (
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                   <AnalysisPanel analysis={queryResponse?.processing?.analysis} />

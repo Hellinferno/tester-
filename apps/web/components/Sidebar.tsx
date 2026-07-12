@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Activity, BarChart3, MessageSquare, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { Activity, MessageSquare, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { SettingsPanel } from './SettingsPanel/SettingsPanel';
 
 interface SidebarProps {
@@ -13,7 +13,6 @@ const NAV = [
   { id: 'query', label: 'Chat', icon: MessageSquare },
   { id: 'system-instructions', label: 'System instructions', icon: SlidersHorizontal },
   { id: 'analytics', label: 'Processing & routing', icon: Activity },
-  { id: 'benchmark', label: 'Benchmarks', icon: BarChart3 },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
