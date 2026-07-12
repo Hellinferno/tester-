@@ -1,0 +1,12 @@
+node_modules
+.next
+dist
+build
+coverage
+playwright-report
+supabase/.branches
+supabase/.temp
+pnpm-lock.yaml
+**/*.py
+builder/developer_extracted
+packages/shared-types/src/supabase-generated.ts

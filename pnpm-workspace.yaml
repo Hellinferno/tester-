@@ -1,0 +1,9 @@
+packages:
+  # Web applications
+  - 'apps/*'
+  # Backend services (FastAPI/Python; only the JS-facing ones declare package.json)
+  - 'services/*'
+  # Shared libraries
+  - 'packages/*'
+allowBuilds:
+  esbuild: set this to true or false

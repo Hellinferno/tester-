@@ -1,0 +1,59 @@
+{
+  "name": "slm-router",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Multi-Modal SLM Query Router & Response System (Vercel + Render + Supabase)",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:watch": "turbo run test:watch",
+    "test:coverage": "turbo run test:coverage",
+    "test:e2e": "turbo run test:e2e",
+    "clean": "turbo run clean && rimraf node_modules",
+
+    "--- Python service scripts (replace `make` targets from docs) ---": "",
+    "py:test": "pnpm -r --filter './services/*' exec pytest || true",
+    "py:test:ocr": "cd services/ocr-service && pytest",
+    "py:test:stt": "cd services/stt-service && pytest",
+    "py:test:analysis": "cd services/analysis-engine && pytest",
+    "py:test:router": "cd services/router-service && pytest",
+    "py:test:orchestrator": "cd services/orchestrator && pytest",
+    "py:lint": "pnpm -r --filter './services/*' exec ruff check . || true",
+
+    "--- Infrastructure ---": "",
+    "docker:up": "docker compose -f infra/docker/docker-compose.yml up -d",
+    "docker:down": "docker compose -f infra/docker/docker-compose.yml down",
+    "docker:logs": "docker compose -f infra/docker/docker-compose.yml logs -f",
+    "docker:build": "docker compose -f infra/docker/docker-compose.yml build",
+
+    "--- Database (Supabase) ---": "",
+    "db:reset": "supabase db reset",
+    "db:push": "supabase db push",
+    "db:seed": "supabase seed run",
+    "db:migration:new": "supabase migration new",
+    "db:types": "supabase gen types typescript --local > packages/shared-types/src/supabase-generated.ts",
+
+    "--- Local dev orchestration ---": "",
+    "dev:web": "pnpm --filter @slm-router/web dev",
+    "dev:services": "docker compose -f infra/docker/docker-compose.yml up",
+    "setup": "pnpm install && pnpm docker:up && pnpm db:reset && pnpm db:seed"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "prettier": "^3.2.0",
+    "prettier-plugin-tailwindcss": "^0.5.11",
+    "rimraf": "^5.0.5",
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0"
+  }
+}

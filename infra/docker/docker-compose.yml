@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  orchestrator:
+    build:
+      context: ../../services/orchestrator
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - OCR_SERVICE_URL=http://ocr-service:8002
+      - STT_SERVICE_URL=http://stt-service:8003
+      - ANALYSIS_SERVICE_URL=http://analysis-engine:8004
+      - ROUTER_SERVICE_URL=http://router-service:8005
+    depends_on:
+      - ocr-service
+      - stt-service
+      - analysis-engine
+      - router-service
+
+  ocr-service:
+    build:
+      context: ../../services/ocr-service
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+
+  stt-service:
+    build:
+      context: ../../services/stt-service
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8003"
+
+  analysis-engine:
+    build:
+      context: ../../services/analysis-engine
+      dockerfile: Dockerfile
+    ports:
+      - "8004:8004"
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+
+  router-service:
+    build:
+      context: ../../services/router-service
+      dockerfile: Dockerfile
+    ports:
+      - "8005:8005"
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
