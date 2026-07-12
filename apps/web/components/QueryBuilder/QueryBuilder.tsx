@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Camera, Cpu, FileAudio, MessageSquare, Play, RefreshCw, Sliders, Zap } from 'lucide-react';
+import { Camera, Cpu, FileAudio, Globe, MessageSquare, Play, RefreshCw, Sliders, Zap } from 'lucide-react';
 import { MediaUploader } from '../MediaUploader/MediaUploader';
 import { Modality } from '../../types';
 import { MODEL_OPTIONS } from '../../lib/models';
@@ -14,6 +14,7 @@ interface QueryBuilderProps {
     stream: boolean;
     priority: string;
     model: string;
+    webSearch: boolean;
   }) => void;
   isLoading: boolean;
 }
@@ -24,6 +25,7 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({ onSubmit, isLoading 
   const [image, setImage] = useState<File | null>(null);
   const [voice, setVoice] = useState<File | null>(null);
   const [stream, setStream] = useState(true);
+  const [webSearch, setWebSearch] = useState(false);
   const [priority, setPriority] = useState<'quality' | 'cost' | 'latency'>('quality');
   // Model choice: an id from MODEL_OPTIONS, or 'custom' to type any OpenRouter id.
   const [modelChoice, setModelChoice] = useState<string>(DEFAULT_MODEL);
@@ -50,6 +52,7 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({ onSubmit, isLoading 
       stream,
       priority,
       model,
+      webSearch,
     });
   };
 
@@ -198,7 +201,17 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({ onSubmit, isLoading 
           ))}
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-4">
+          <label className="flex items-center space-x-2 cursor-pointer" title="Ground the answer with live Google results (SerpAPI). Works in non-streaming mode.">
+            <input
+              type="checkbox"
+              checked={webSearch}
+              onChange={(e) => setWebSearch(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-700 bg-gray-800 text-blue-600 focus:ring-blue-500"
+            />
+            <Globe className="h-3.5 w-3.5 text-blue-400" />
+            <span className="text-xs font-medium text-gray-300">Web Search</span>
+          </label>
           <label className="flex items-center space-x-2 cursor-pointer">
             <input
               type="checkbox"

@@ -27,6 +27,7 @@ export default function DashboardPage() {
     stream: boolean;
     priority: string;
     model: string;
+    webSearch: boolean;
   }) => {
     setIsLoading(true);
     setIsStreaming(false);
@@ -39,7 +40,12 @@ export default function DashboardPage() {
     if (data.voice) formData.append('voice', data.voice);
     formData.append(
       'options',
-      JSON.stringify({ stream: data.stream, priority: data.priority, model: data.model }),
+      JSON.stringify({
+        stream: data.stream,
+        priority: data.priority,
+        model: data.model,
+        web_search: data.webSearch,
+      }),
     );
 
     // BYOK: attach the user's own OpenRouter key (from Settings) per request.

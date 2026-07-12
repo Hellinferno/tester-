@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from src.input_processor import InputValidator, ValidationError
 from src.response_builder import ResponseAssembler
+from src.grounding import serpapi_search
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("orchestrator")
@@ -32,6 +33,8 @@ OCR_SERVICE_URL = os.getenv("OCR_SERVICE_URL", "http://localhost:8002")
 STT_SERVICE_URL = os.getenv("STT_SERVICE_URL", "http://localhost:8003")
 ANALYSIS_SERVICE_URL = os.getenv("ANALYSIS_SERVICE_URL", "http://localhost:8004")
 ROUTER_SERVICE_URL = os.getenv("ROUTER_SERVICE_URL", "http://localhost:8005")
+# SerpAPI key for optional web-search grounding (app-level, not BYOK).
+SERPAPI_API_KEY = os.getenv("SERPAPI_API_KEY", "")
 
 # In-memory status store for accepted async queries
 queries_store: Dict[str, Dict[str, Any]] = {}
@@ -76,6 +79,7 @@ async def submit_query(
     request_id = str(uuid.uuid4())
     opts = json.loads(options) if options else {}
     stream_requested = opts.get("stream", False)
+    web_search_requested = opts.get("web_search", False)
 
     # Step 1: OCR Processing if image present
     ocr_info = {}
@@ -177,11 +181,23 @@ async def submit_query(
         routing_res["display_name"] = forced_model.split("/")[-1]
         routing_res["reasoning"] = f"User-selected model override: {forced_model}."
 
+    # Optional web-search grounding (SerpAPI): only when the user enabled it.
+    grounding = {"context": "", "sources": []}
+    if web_search_requested and SERPAPI_API_KEY:
+        grounding = await serpapi_search(combined_text, SERPAPI_API_KEY)
+    processing_info["grounding"] = {
+        "enabled": bool(web_search_requested),
+        "used": bool(grounding["context"]),
+        "sources": grounding["sources"],
+    }
+
     if stream_requested:
         async def event_generator():
             yield f"data: {json.dumps({'event': 'status', 'data': {'stage': 'processing'}})}\n\n"
             yield f"data: {json.dumps({'event': 'analysis', 'data': analysis_res})}\n\n"
             yield f"data: {json.dumps({'event': 'routing', 'data': routing_res})}\n\n"
+            if processing_info['grounding']['used']:
+                yield f"data: {json.dumps({'event': 'grounding', 'data': processing_info['grounding']})}\n\n"
             # Stream response chunks
             simulated_response = f"Analyzed query using model {selected_model}. Here is your answer: {combined_text}"
             for i, word in enumerate(simulated_response.split()):
@@ -191,7 +207,11 @@ async def submit_query(
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-    # Non-streaming response generation
+    # Non-streaming response generation. Prepend web-search context when grounded.
+    gen_messages = [{"role": "user", "content": combined_text}]
+    if grounding["context"]:
+        gen_messages.insert(0, {"role": "system", "content": grounding["context"]})
+
     gen_res = {}
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -199,7 +219,7 @@ async def submit_query(
                 f"{ROUTER_SERVICE_URL}/generate",
                 json={
                     "model": selected_model,
-                    "messages": [{"role": "user", "content": combined_text}],
+                    "messages": gen_messages,
                 },
                 headers=downstream_headers,
             )
