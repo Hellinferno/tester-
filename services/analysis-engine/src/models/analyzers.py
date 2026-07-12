@@ -17,6 +17,9 @@ class SLMAnalysisEngine:
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY", "")
+        # Configurable analysis SLM (ANALYSIS_SLM_MODEL env var); falls back to
+        # the default cheap/fast model when unset.
+        self.model = os.getenv("ANALYSIS_SLM_MODEL", "meta-llama/llama-3.1-8b-instruct")
         self.selector = InstructionProfileSelector()
 
     async def analyze(
@@ -78,7 +81,7 @@ class SLMAnalysisEngine:
             "X-Title": "SLM Router",
         }
         payload = {
-            "model": "meta-llama/llama-3.1-8b-instruct",
+            "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
             "response_format": {"type": "json_object"},
