@@ -1,57 +1,100 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Navbar } from '../components/Navbar';
-import { QueryBuilder } from '../components/QueryBuilder/QueryBuilder';
-import { AnalysisPanel } from '../components/AnalysisPanel/AnalysisPanel';
-import { ModelSelector } from '../components/ModelSelector/ModelSelector';
-import { ResponseStream } from '../components/ResponseStream/ResponseStream';
+import React, { useEffect, useRef, useState } from 'react';
+import { ArrowUp, ImageIcon, Loader2, Mic, Sparkles, X } from 'lucide-react';
+import { Sidebar } from '../components/Sidebar';
+import { RunSettings } from '../components/RunSettings';
 import { BenchmarkPanel } from '../components/BenchmarkPanel/BenchmarkPanel';
 import { SystemInstructionEditor } from '../components/SystemInstructionEditor/SystemInstructionEditor';
+import { AnalysisPanel } from '../components/AnalysisPanel/AnalysisPanel';
+import { ModelSelector } from '../components/ModelSelector/ModelSelector';
 import { Modality, QueryResponse } from '../types';
-import { Activity } from 'lucide-react';
-import { getOpenRouterKey, ORCHESTRATOR_URL } from '../lib/settings';
+import { getOpenRouterKey, ORCHESTRATOR_URL, DEFAULT_MODEL } from '../lib/settings';
 
-export default function DashboardPage() {
+type Source = { title: string; link: string };
+
+function deriveModality(text: string, image: File | null, voice: File | null): Modality {
+  const hasText = !!text.trim();
+  if (image && voice) return 'image_voice';
+  if (image) return (hasText ? 'image_text' : 'image_only') as Modality;
+  if (voice) return 'voice_only';
+  return 'text_only';
+}
+
+export default function StudioPage() {
   const [activeTab, setActiveTab] = useState('query');
+
+  // run settings
+  const [modelChoice, setModelChoice] = useState<string>(DEFAULT_MODEL);
+  const [customModel, setCustomModel] = useState('');
+  const [temperature, setTemperature] = useState(0.7);
+  const [webSearch, setWebSearch] = useState(false);
+  const [stream, setStream] = useState(true);
+
+  // prompt input
+  const [text, setText] = useState('');
+  const [image, setImage] = useState<File | null>(null);
+  const [voice, setVoice] = useState<File | null>(null);
+
+  // run output
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamContent, setStreamContent] = useState('');
   const [queryResponse, setQueryResponse] = useState<QueryResponse | undefined>(undefined);
+  const [sentPrompt, setSentPrompt] = useState<{ text: string; image?: string; voice?: string } | null>(null);
+  const [sources, setSources] = useState<Source[]>([]);
 
-  const handleQuerySubmit = async (data: {
-    modality: Modality;
-    text: string;
-    image: File | null;
-    voice: File | null;
-    stream: boolean;
-    priority: string;
-    model: string;
-    webSearch: boolean;
-  }) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const imageInput = useRef<HTMLInputElement>(null);
+  const voiceInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [streamContent, queryResponse]);
+
+  const resolvedModel = modelChoice === 'custom' ? customModel.trim() || 'auto' : modelChoice;
+  const answer = isStreaming ? streamContent : queryResponse?.response?.content || '';
+  const canRun = !isLoading && (!!text.trim() || !!image || !!voice);
+
+  const handleReset = () => {
+    setModelChoice(DEFAULT_MODEL);
+    setCustomModel('');
+    setTemperature(0.7);
+    setWebSearch(false);
+  };
+
+  const handleRun = async () => {
+    if (!canRun) return;
+    const modality = deriveModality(text, image, voice);
+
+    setSentPrompt({ text: text.trim(), image: image?.name, voice: voice?.name });
     setIsLoading(true);
     setIsStreaming(false);
     setStreamContent('');
+    setSources([]);
+    setQueryResponse(undefined);
 
     const formData = new FormData();
-    formData.append('modality', data.modality);
-    formData.append('text', data.text);
-    if (data.image) formData.append('image', data.image);
-    if (data.voice) formData.append('voice', data.voice);
+    formData.append('modality', modality);
+    formData.append('text', text);
+    if (image) formData.append('image', image);
+    if (voice) formData.append('voice', voice);
     formData.append(
       'options',
       JSON.stringify({
-        stream: data.stream,
-        priority: data.priority,
-        model: data.model,
-        web_search: data.webSearch,
+        stream,
+        priority: 'quality',
+        model: resolvedModel,
+        web_search: webSearch,
+        temperature,
       }),
     );
 
-    // BYOK: attach the user's own OpenRouter key (from Settings) per request.
     const apiKey = getOpenRouterKey();
     const headers: Record<string, string> = {};
     if (apiKey) headers['X-OpenRouter-Key'] = apiKey;
+
+    setText('');
 
     try {
       const response = await fetch(`${ORCHESTRATOR_URL}/v1/queries`, {
@@ -60,239 +103,260 @@ export default function DashboardPage() {
         body: formData,
       });
 
-      if (response.ok) {
-        if (data.stream && response.body) {
-          setIsLoading(false);
-          setIsStreaming(true);
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let fullText = '';
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const chunk = decoder.decode(value);
-            const lines = chunk.split('\n');
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const payload = line.slice(6).trim();
-                try {
-                  const parsed = JSON.parse(payload);
-                  if (parsed.event === 'analysis') {
-                    setQueryResponse((prev: any) => ({
-                      ...prev,
-                      processing: { ...prev?.processing, analysis: parsed.data },
-                    }));
-                  } else if (parsed.event === 'routing') {
-                    setQueryResponse((prev: any) => ({
-                      ...prev,
-                      processing: { ...prev?.processing, routing: parsed.data },
-                    }));
-                  } else if (parsed.event === 'chunk') {
-                    fullText += parsed.data.content;
-                    setStreamContent(fullText);
-                  }
-                } catch (err) {}
+      if (response.ok && stream && response.body) {
+        setIsLoading(false);
+        setIsStreaming(true);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let full = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          for (const line of decoder.decode(value).split('\n')) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const parsed = JSON.parse(line.slice(6).trim());
+              if (parsed.event === 'analysis') {
+                setQueryResponse((p: any) => ({ ...p, processing: { ...p?.processing, analysis: parsed.data } }));
+              } else if (parsed.event === 'routing') {
+                setQueryResponse((p: any) => ({ ...p, processing: { ...p?.processing, routing: parsed.data } }));
+              } else if (parsed.event === 'grounding') {
+                setSources(parsed.data?.sources || []);
+              } else if (parsed.event === 'chunk') {
+                full += parsed.data.content;
+                setStreamContent(full);
               }
+            } catch {
+              /* ignore keepalive / partial lines */
             }
           }
-          setIsStreaming(false);
-          return;
         }
+        setIsStreaming(false);
+        return;
+      }
 
-        const jsonRes = await response.json();
-        setQueryResponse(jsonRes);
+      if (response.ok) {
+        const json = await response.json();
+        setQueryResponse(json);
+        setSources(json?.processing?.grounding?.sources || []);
         setIsLoading(false);
         return;
       }
-    } catch (err) {}
+    } catch {
+      /* fall through to offline notice */
+    }
 
-    setTimeout(() => {
-      setIsLoading(false);
-      const simulatedAnalysis = {
-        complexity: { level: 'high' as const, score: 0.84 },
-        subject: { primary: 'computer_science', confidence: 0.93 },
-        reasoning: {
-          type: 'multi_step',
-          estimated_steps: 4,
-          requires_thinking: true,
-          thinking_tokens: 2048,
-        },
-        intent: {
-          primary: 'code_generation',
-          reformulated_query: data.text,
-        },
-        output_requirements: { format: 'markdown', estimated_tokens: 1250 },
-        instruction_profile: {
-          title: 'Technical Analysis',
-          instructions: 'Rigorous step-by-step reasoning profile.',
-        },
-      };
+    setIsLoading(false);
+    setStreamContent(
+      'Could not reach the orchestrator. Check that the service is running and NEXT_PUBLIC_ORCHESTRATOR_URL is set.',
+    );
+  };
 
-      const simulatedRouting = {
-        selected_model: 'anthropic/claude-3.5-sonnet',
-        display_name: 'Claude 3.5 Sonnet',
-        confidence: 0.94,
-        estimated_cost_usd: 0.0035,
-        estimated_latency_ms: 1850,
-        fallback_chain: ['openai/gpt-4o', 'google/gemini-pro-1.5'],
-        reasoning: `Optimal capability match for modality='${data.modality}' and subject='computer_science'.`,
-      };
-
-      const simulatedResponse: QueryResponse = {
-        request_id: 'slm-req-' + Math.random().toString(36).substring(2, 8),
-        status: 'completed',
-        modality: data.modality,
-        input: { text: data.text },
-        processing: {
-          analysis: simulatedAnalysis,
-          routing: simulatedRouting,
-        },
-        response: {
-          content: `### SLM Multi-Modal Query Synthesis\n\n**Analysis Summary:**\n- **Modality:** \`${data.modality}\`\n- **Subject:** Computer Science (93% confidence)\n- **Routing Choice:** \`anthropic/claude-3.5-sonnet\` (Confidence: 94%)\n\n**Detailed Findings:**\nBased on your prompt (\`${data.text}\`), the orchestrator routed execution through our specialized analysis pipeline. Cold-start bottlenecks in serverless functions can be mitigated by offloading persistent heavy ML workloads (such as OCR and STT engines) to Render microservices while maintaining low-latency edge dispatch on Vercel.`,
-          content_type: 'text/markdown',
-          tokens_used: 412,
-          tokens_input: 140,
-          tokens_output: 272,
-          generated_at: new Date().toISOString(),
-        },
-        cost: {
-          total_usd: 0.0035,
-          model_cost: 0.0033,
-          processing_cost: 0.0002,
-        },
-      };
-
-      setQueryResponse(simulatedResponse);
-
-      if (data.stream) {
-        setIsStreaming(true);
-        const textToStream = simulatedResponse.response!.content;
-        let index = 0;
-        const interval = setInterval(() => {
-          index += 5;
-          setStreamContent(textToStream.slice(0, index));
-          if (index >= textToStream.length) {
-            clearInterval(interval);
-            setIsStreaming(false);
-          }
-        }, 30);
-      } else {
-        setStreamContent(simulatedResponse.response!.content);
-      }
-    }, 900);
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      handleRun();
+    }
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
+    <div className="flex h-screen w-full overflow-hidden bg-studio-canvas text-studio-text">
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-6 py-8">
-        {activeTab === 'query' && (
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-            <div className="space-y-6 lg:col-span-7">
-              <QueryBuilder onSubmit={handleQuerySubmit} isLoading={isLoading} />
-              <ResponseStream
-                response={queryResponse}
-                streamContent={streamContent}
-                isStreaming={isStreaming}
-              />
-            </div>
-            <div className="space-y-6 lg:col-span-5">
-              <AnalysisPanel analysis={queryResponse?.processing?.analysis} />
-              <ModelSelector routing={queryResponse?.processing?.routing} />
-            </div>
-          </div>
-        )}
+      <main className="flex min-w-0 flex-1">
+        {activeTab === 'query' ? (
+          <>
+            {/* Center: chat canvas */}
+            <section className="flex min-w-0 flex-1 flex-col bg-studio-canvas">
+              <header className="flex items-center justify-between border-b border-studio-line px-6 py-[13px]">
+                <div className="font-display text-[15px] font-medium">Chat</div>
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-studio-muted">
+                  <input
+                    type="checkbox"
+                    checked={stream}
+                    onChange={(e) => setStream(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-studio-blue"
+                  />
+                  Stream response
+                </label>
+              </header>
 
-        {activeTab === 'system-instructions' && (
-          <SystemInstructionEditor />
-        )}
-
-        {activeTab === 'analytics' && (
-          <div className="space-y-6">
-            <div className="rounded-2xl border border-gray-800 bg-gray-900/60 p-6 shadow-xl backdrop-blur-xl">
-              <div className="flex items-center space-x-2 border-b border-gray-800 pb-4">
-                <Activity className="h-6 w-6 text-blue-400" />
-                <h2 className="text-lg font-bold text-white">System Architecture & Pipeline Telemetry</h2>
-              </div>
-
-              <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-5">
-                {[
-                  {
-                    name: 'Orchestrator Gateway',
-                    port: ':8001',
-                    status: 'Active',
-                    role: 'Payload validation & multi-modal orchestration',
-                  },
-                  {
-                    name: 'OCR Service',
-                    port: ':8002',
-                    status: 'Active',
-                    role: 'Multi-engine vision OCR (Tesseract, EasyOCR, PaddleOCR)',
-                  },
-                  {
-                    name: 'STT Service',
-                    port: ':8003',
-                    status: 'Active',
-                    role: 'Audio transcription (Whisper, Deepgram)',
-                  },
-                  {
-                    name: 'Analysis Engine',
-                    port: ':8004',
-                    status: 'Active',
-                    role: 'SLM complexity scoring & domain classification',
-                  },
-                  {
-                    name: 'Router Service',
-                    port: ':8005',
-                    status: 'Active',
-                    role: 'Multi-objective LLM routing & fallback chains',
-                  },
-                ].map((svc) => (
-                  <div
-                    key={svc.name}
-                    className="flex flex-col justify-between rounded-xl border border-gray-800 bg-gray-950/60 p-4"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold uppercase text-blue-400">
-                          Port {svc.port}
-                        </span>
-                        <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-400 border border-emerald-500/30">
-                          {svc.status}
-                        </span>
+              <div ref={scrollRef} className="flex-1 overflow-y-auto">
+                <div className="mx-auto max-w-3xl px-6 py-8">
+                  {!sentPrompt && !answer ? (
+                    <div className="flex min-h-[52vh] flex-col items-center justify-center text-center">
+                      <div className="grid h-14 w-14 place-items-center rounded-2xl bg-studio-bluesoft text-studio-blue">
+                        <Sparkles className="h-7 w-7" />
                       </div>
-                      <h4 className="mt-2 text-sm font-bold text-white">{svc.name}</h4>
-                      <p className="mt-1 text-xs text-gray-400">{svc.role}</p>
+                      <h1 className="mt-5 font-display text-2xl font-medium text-studio-text">
+                        What can I help you build?
+                      </h1>
+                      <p className="mt-2 max-w-md text-sm text-studio-muted">
+                        Type a prompt, attach an image or audio, choose a model in Run settings, and run.
+                      </p>
                     </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {sentPrompt && (
+                        <div className="flex flex-col items-end gap-1">
+                          <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-studio-bluesoft px-4 py-2.5 text-sm text-studio-text">
+                            {sentPrompt.text || <span className="text-studio-muted">(no text)</span>}
+                          </div>
+                          {(sentPrompt.image || sentPrompt.voice) && (
+                            <div className="flex gap-1.5 text-xs text-studio-muted">
+                              {sentPrompt.image && <span>🖼 {sentPrompt.image}</span>}
+                              {sentPrompt.voice && <span>🎙 {sentPrompt.voice}</span>}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex gap-3">
+                        <div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-studio-blue text-white">
+                          <Sparkles className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          {isLoading && !answer ? (
+                            <div className="flex items-center gap-2 py-1 text-sm text-studio-muted">
+                              <Loader2 className="h-4 w-4 animate-spin" /> Thinking…
+                            </div>
+                          ) : (
+                            <div className="whitespace-pre-wrap text-[15px] leading-7 text-studio-text">
+                              {answer}
+                              {isStreaming && <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-studio-blue align-middle" />}
+                            </div>
+                          )}
+
+                          {sources.length > 0 && (
+                            <div className="mt-4">
+                              <div className="mb-1.5 text-xs font-medium text-studio-muted">Sources</div>
+                              <div className="flex flex-wrap gap-2">
+                                {sources.map((s, i) => (
+                                  <a
+                                    key={i}
+                                    href={s.link}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="max-w-[240px] truncate rounded-full border border-studio-border bg-studio-surface px-3 py-1 text-xs text-studio-bluetext hover:bg-studio-hover"
+                                  >
+                                    {s.title || s.link}
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Prompt bar */}
+              <div className="px-6 pb-6 pt-1">
+                <div className="mx-auto max-w-3xl">
+                  {(image || voice) && (
+                    <div className="mb-2 flex flex-wrap gap-2">
+                      {image && (
+                        <Chip label={image.name} onRemove={() => setImage(null)} icon={<ImageIcon className="h-3.5 w-3.5" />} />
+                      )}
+                      {voice && (
+                        <Chip label={voice.name} onRemove={() => setVoice(null)} icon={<Mic className="h-3.5 w-3.5" />} />
+                      )}
+                    </div>
+                  )}
+                  <div className="flex items-end gap-1 rounded-[26px] border border-studio-border bg-white p-2 shadow-sm transition-colors focus-within:border-studio-blue">
+                    <button
+                      onClick={() => imageInput.current?.click()}
+                      title="Attach image"
+                      className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-studio-muted hover:bg-studio-hover"
+                    >
+                      <ImageIcon className="h-5 w-5" />
+                    </button>
+                    <button
+                      onClick={() => voiceInput.current?.click()}
+                      title="Attach audio"
+                      className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-studio-muted hover:bg-studio-hover"
+                    >
+                      <Mic className="h-5 w-5" />
+                    </button>
+                    <textarea
+                      value={text}
+                      onChange={(e) => setText(e.target.value)}
+                      onKeyDown={onKeyDown}
+                      rows={1}
+                      placeholder="Enter a prompt here"
+                      className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2.5 text-[15px] text-studio-text placeholder-studio-faint focus:outline-none"
+                    />
+                    <button
+                      onClick={handleRun}
+                      disabled={!canRun}
+                      title="Run (Ctrl+Enter)"
+                      className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-studio-blue text-white transition-colors hover:bg-studio-bluehover disabled:bg-[#c4c7c5]"
+                    >
+                      {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <ArrowUp className="h-5 w-5" />}
+                    </button>
                   </div>
-                ))}
+                  <p className="mt-2 text-center text-xs text-studio-faint">
+                    Bring your own OpenRouter key in the sidebar. Ctrl/⌘ + Enter to run.
+                  </p>
+                </div>
+                <input
+                  ref={imageInput}
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={(e) => setImage(e.target.files?.[0] || null)}
+                />
+                <input
+                  ref={voiceInput}
+                  type="file"
+                  accept="audio/*"
+                  hidden
+                  onChange={(e) => setVoice(e.target.files?.[0] || null)}
+                />
               </div>
+            </section>
 
-              <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-4">
-                <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
-                  <span className="text-xs text-gray-400">Avg. Orchestrator Latency</span>
-                  <p className="mt-1 text-xl font-bold text-white">48 ms</p>
+            <RunSettings
+              modelChoice={modelChoice}
+              setModelChoice={setModelChoice}
+              customModel={customModel}
+              setCustomModel={setCustomModel}
+              temperature={temperature}
+              setTemperature={setTemperature}
+              webSearch={webSearch}
+              setWebSearch={setWebSearch}
+              analysis={queryResponse?.processing?.analysis}
+              routing={queryResponse?.processing?.routing}
+              onReset={handleReset}
+            />
+          </>
+        ) : (
+          <section className="min-w-0 flex-1 overflow-y-auto bg-studio-canvas">
+            <div className="mx-auto max-w-5xl px-6 py-8">
+              {activeTab === 'system-instructions' && <SystemInstructionEditor />}
+              {activeTab === 'benchmark' && <BenchmarkPanel />}
+              {activeTab === 'analytics' && (
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                  <AnalysisPanel analysis={queryResponse?.processing?.analysis} />
+                  <ModelSelector routing={queryResponse?.processing?.routing} />
                 </div>
-                <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
-                  <span className="text-xs text-gray-400">Avg. LLM Generation Time</span>
-                  <p className="mt-1 text-xl font-bold text-blue-400">1,420 ms</p>
-                </div>
-                <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
-                  <span className="text-xs text-gray-400">Routing Accuracy Score</span>
-                  <p className="mt-1 text-xl font-bold text-emerald-400">98.4%</p>
-                </div>
-                <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
-                  <span className="text-xs text-gray-400">Cost Savings vs Fixed GPT-4o</span>
-                  <p className="mt-1 text-xl font-bold text-purple-400">64.2%</p>
-                </div>
-              </div>
+              )}
             </div>
-          </div>
+          </section>
         )}
-
-        {activeTab === 'benchmark' && <BenchmarkPanel />}
       </main>
     </div>
   );
 }
+
+const Chip: React.FC<{ label: string; onRemove: () => void; icon: React.ReactNode }> = ({ label, onRemove, icon }) => (
+  <span className="flex items-center gap-1.5 rounded-full border border-studio-border bg-studio-surface px-3 py-1 text-xs text-studio-text">
+    {icon}
+    <span className="max-w-[160px] truncate">{label}</span>
+    <button onClick={onRemove} className="text-studio-muted hover:text-studio-text">
+      <X className="h-3.5 w-3.5" />
+    </button>
+  </span>
+);

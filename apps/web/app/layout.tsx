@@ -2,9 +2,9 @@ import './globals.css';
 import React from 'react';
 
 export const metadata = {
-  title: 'SLM Router - Multi-Modal Query Orchestrator',
+  title: 'SLM Router Studio',
   description:
-    'Intelligent Small Language Model Multi-Modal Query Router with OCR, STT, Analysis, and Routing Engines.',
+    'Multi-modal SLM query router — pick a model, ground with web search, and route to the best model.',
 };
 
 export default function RootLayout({
@@ -13,9 +13,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
-      <body className="min-h-screen bg-[#0a0a0f] text-gray-100 selection:bg-blue-500 selection:text-white">
-        <div className="relative flex min-h-screen flex-col">{children}</div>
+    <html lang="en">
+      <head>
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="min-h-screen bg-studio-canvas font-sans text-studio-text antialiased">
+        {children}
       </body>
     </html>
   );

@@ -1,31 +1,62 @@
-@import '../../../packages/ui-components/src/tokens.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
 }
 
 body {
-  background-color: var(--color-background);
-  color: var(--color-text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  overflow-x: hidden;
+  background-color: #ffffff;
+  color: #1f1f1f;
+  font-family: 'Roboto', system-ui, 'Helvetica Neue', Arial, sans-serif;
+  overflow: hidden; /* app-shell layout owns its own scroll regions */
 }
 
-/* Custom scrollbar */
+/* AI Studio-style thin scrollbars */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #0f101a;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a2b3d;
-  border-radius: 4px;
+  background: #c9cdd3;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3b82f6;
+  background: #a8adb4;
+  background-clip: content-box;
+}
+
+/* range input styled like Material sliders */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: #c7d6f5;
+  outline: none;
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  width: 14px;
+  border-radius: 50%;
+  background: #0b57d0;
+  cursor: pointer;
+  box-shadow: 0 0 0 0 rgba(11, 87, 208, 0.15);
+  transition: box-shadow 0.15s;
+}
+input[type='range']::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 6px rgba(11, 87, 208, 0.15);
 }
