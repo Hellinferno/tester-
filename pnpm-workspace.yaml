@@ -5,5 +5,9 @@ packages:
   - 'services/*'
   # Shared libraries
   - 'packages/*'
+
+# pnpm 11 build-script approval (replaces onlyBuiltDependencies).
+# esbuild only needs its native-binary install script; approve it so
+# `pnpm install` doesn't fail on CI (Vercel) with ERR_PNPM_IGNORED_BUILDS.
 allowBuilds:
-  esbuild: set this to true or false
+  esbuild: true
