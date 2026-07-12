@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from slm_router_shared.clients.openrouter_client import OpenRouterClient
+from src.clients.openrouter_client import OpenRouterClient
 from src.routing.model_router import ModelRouter, UserPreferences
 
 logging.basicConfig(level=logging.INFO)

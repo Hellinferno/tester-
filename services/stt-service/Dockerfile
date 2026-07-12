@@ -14,4 +14,5 @@ COPY src/ ./src/
 ENV PYTHONPATH=/app/src
 EXPOSE 8003
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8003"]
+# Bind Render's injected $PORT (falls back to 8003 for local docker runs).
+CMD ["sh", "-c", "uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8003}"]
