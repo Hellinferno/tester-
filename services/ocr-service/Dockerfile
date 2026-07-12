@@ -2,9 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# libgl1 replaces libgl1-mesa-glx (removed in newer Debian). Needed only if
+# OpenCV-based OCR engines are added; harmless otherwise.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
-    libgl1-mesa-glx \
+    libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
