@@ -18,6 +18,8 @@ export interface SubjectResult {
 export interface ReasoningResult {
   type: string;
   estimated_steps: number;
+  requires_thinking?: boolean;
+  thinking_tokens?: number;
 }
 
 export interface InstructionProfile {

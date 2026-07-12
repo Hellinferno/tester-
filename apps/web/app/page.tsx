@@ -105,7 +105,12 @@ export default function DashboardPage() {
       const simulatedAnalysis = {
         complexity: { level: 'high' as const, score: 0.84 },
         subject: { primary: 'computer_science', confidence: 0.93 },
-        reasoning: { type: 'multi_step', estimated_steps: 4 },
+        reasoning: {
+          type: 'multi_step',
+          estimated_steps: 4,
+          requires_thinking: true,
+          thinking_tokens: 2048,
+        },
         intent: {
           primary: 'code_generation',
           reformulated_query: data.text,

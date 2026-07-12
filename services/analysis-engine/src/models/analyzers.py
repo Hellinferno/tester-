@@ -45,6 +45,20 @@ class SLMAnalysisEngine:
         # Robust heuristic & keyword SLM analyzer
         return self._analyze_heuristically(text, modality, has_image, has_voice)
 
+    @staticmethod
+    def _estimate_thinking(
+        reasoning_type: str, estimated_steps: int, complexity_level: str
+    ) -> Dict[str, Any]:
+        """Heuristic estimate of chain-of-thought ('thinking') tokens the query
+        is likely to need before it answers. Simple/factual queries need none.
+        Scales with reasoning depth (steps × per-step budget) and complexity."""
+        per_step = {"factual": 0, "creative": 120, "analytical": 180, "multi_step": 320}
+        complexity_mult = {"low": 0.5, "medium": 1.0, "high": 1.6, "critical": 2.3}
+        requires = reasoning_type in ("analytical", "multi_step") or complexity_level in ("high", "critical")
+        base = per_step.get(reasoning_type, 150)
+        tokens = int(estimated_steps * base * complexity_mult.get(complexity_level, 1.0)) if requires else 0
+        return {"requires_thinking": requires, "thinking_tokens": tokens}
+
     async def _analyze_via_openrouter(
         self, text: str, modality: str, api_key: str
     ) -> Optional[Dict[str, Any]]:
@@ -78,6 +92,16 @@ class SLMAnalysisEngine:
                 subject_primary = data.get("subject", {}).get("primary", "general_knowledge")
                 profile = self.selector.select(modality, subject_primary, complexity_level)
                 data["instruction_profile"] = profile
+                # Estimate thinking tokens from the SLM's own reasoning assessment
+                reasoning = data.get("reasoning", {}) or {}
+                reasoning.update(
+                    self._estimate_thinking(
+                        reasoning.get("type", "analytical"),
+                        int(reasoning.get("estimated_steps", 2) or 2),
+                        complexity_level,
+                    )
+                )
+                data["reasoning"] = reasoning
                 return data
         return None
 
@@ -132,7 +156,11 @@ class SLMAnalysisEngine:
         return {
             "complexity": {"level": complexity, "score": score},
             "subject": {"primary": subject, "confidence": conf},
-            "reasoning": {"type": reasoning_type, "estimated_steps": steps},
+            "reasoning": {
+                "type": reasoning_type,
+                "estimated_steps": steps,
+                **self._estimate_thinking(reasoning_type, steps, complexity),
+            },
             "intent": {
                 "primary": intent,
                 "reformulated_query": text.strip() if text else "Inspect provided media context.",

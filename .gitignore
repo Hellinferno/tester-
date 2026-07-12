@@ -32,6 +32,8 @@ coverage.xml
 .env
 .env.*
 !.env.example
+# Per-service deploy env files (contain secrets — never commit)
+deploy/*.env
 .env.local
 .env.*.local
 *.pem

@@ -131,7 +131,12 @@ async def submit_query(
         analysis_res = {
             "complexity": {"level": "medium", "score": 0.70},
             "subject": {"primary": "computer_science", "confidence": 0.90},
-            "reasoning": {"type": "analytical", "estimated_steps": 2},
+            "reasoning": {
+                "type": "analytical",
+                "estimated_steps": 2,
+                "requires_thinking": True,
+                "thinking_tokens": 360,
+            },
             "intent": {"primary": "question_answering", "reformulated_query": combined_text},
             "output_requirements": {"format": "text", "estimated_tokens": 500},
             "instruction_profile": {"title": "General Multi-Modal Assistant"},

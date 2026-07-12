@@ -1,5 +1,5 @@
 import React from 'react';
-import { Brain, Compass, Cpu, Gauge, Sparkles } from 'lucide-react';
+import { Brain, Coins, Compass, Cpu, Gauge, Sparkles } from 'lucide-react';
 import { AnalysisResult } from '../../types';
 
 interface AnalysisPanelProps {
@@ -79,6 +79,33 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ analysis }) => {
         <div className="mt-2 flex items-center space-x-2 text-xs text-gray-400">
           <Cpu className="h-3.5 w-3.5 text-blue-400" />
           <span>Profile: {analysis.instruction_profile?.title || 'General Assistant'}</span>
+        </div>
+      </div>
+
+      {/* Token estimates: expected output tokens + thinking (chain-of-thought) tokens */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-xl border border-gray-800/80 bg-gray-950/60 p-3.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-400">Expected Output</span>
+            <Coins className="h-4 w-4 text-gray-500" />
+          </div>
+          <p className="mt-2 text-sm font-semibold text-gray-200">
+            ~{(analysis.output_requirements?.estimated_tokens ?? 0).toLocaleString()} tokens
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-gray-800/80 bg-gray-950/60 p-3.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-400">Thinking Tokens</span>
+            <Brain className="h-4 w-4 text-gray-500" />
+          </div>
+          {analysis.reasoning.requires_thinking && (analysis.reasoning.thinking_tokens ?? 0) > 0 ? (
+            <p className="mt-2 text-sm font-semibold text-purple-300">
+              ~{(analysis.reasoning.thinking_tokens ?? 0).toLocaleString()} tokens
+            </p>
+          ) : (
+            <p className="mt-2 text-sm font-semibold text-gray-500">Not required</p>
+          )}
         </div>
       </div>
     </div>
