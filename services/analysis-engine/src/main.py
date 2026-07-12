@@ -27,6 +27,7 @@ class AnalysisRequest(BaseModel):
     modality: str = "text_only"
     has_image: bool = False
     has_voice: bool = False
+    model: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
 
@@ -47,4 +48,5 @@ async def analyze_query(
         has_image=request.has_image,
         has_voice=request.has_voice,
         api_key=x_openrouter_key,
+        model=request.model,
     )

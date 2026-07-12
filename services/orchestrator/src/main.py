@@ -80,6 +80,11 @@ async def submit_query(
     opts = json.loads(options) if options else {}
     stream_requested = opts.get("stream", False)
     web_search_requested = opts.get("web_search", False)
+    # The user's chosen model drives ALL LLM work (analysis + generation). No
+    # preset. 'auto' / unset means: no specific model (analysis stays heuristic,
+    # generation uses the router's recommendation).
+    user_model = opts.get("model")
+    chosen_model = user_model if user_model and user_model != "auto" else None
 
     # Step 1: OCR Processing if image present
     ocr_info = {}
@@ -125,6 +130,7 @@ async def submit_query(
                     "modality": modality,
                     "has_image": bool(image_bytes),
                     "has_voice": bool(voice_bytes),
+                    "model": chosen_model,
                 },
                 headers=downstream_headers,
             )
@@ -172,14 +178,13 @@ async def submit_query(
 
     selected_model = routing_res.get("selected_model", "anthropic/claude-3.5-sonnet")
 
-    # User-chosen model override (BYOK). 'auto' (or unset) keeps smart routing;
-    # any other value forces that OpenRouter model for generation.
-    forced_model = opts.get("model")
-    if forced_model and forced_model != "auto":
-        selected_model = forced_model
-        routing_res["selected_model"] = forced_model
-        routing_res["display_name"] = forced_model.split("/")[-1]
-        routing_res["reasoning"] = f"User-selected model override: {forced_model}."
+    # User-chosen model override (BYOK). When set, it forces generation onto that
+    # model; 'auto'/unset keeps the router's recommendation.
+    if chosen_model:
+        selected_model = chosen_model
+        routing_res["selected_model"] = chosen_model
+        routing_res["display_name"] = chosen_model.split("/")[-1]
+        routing_res["reasoning"] = f"User-selected model override: {chosen_model}."
 
     # Optional web-search grounding (SerpAPI): only when the user enabled it.
     grounding = {"context": "", "sources": []}
@@ -191,6 +196,11 @@ async def submit_query(
         "sources": grounding["sources"],
     }
 
+    # Generation messages shared by both paths. Prepend web-search context when grounded.
+    gen_messages = [{"role": "user", "content": combined_text}]
+    if grounding["context"]:
+        gen_messages.insert(0, {"role": "system", "content": grounding["context"]})
+
     if stream_requested:
         async def event_generator():
             yield f"data: {json.dumps({'event': 'status', 'data': {'stage': 'processing'}})}\n\n"
@@ -198,20 +208,36 @@ async def submit_query(
             yield f"data: {json.dumps({'event': 'routing', 'data': routing_res})}\n\n"
             if processing_info['grounding']['used']:
                 yield f"data: {json.dumps({'event': 'grounding', 'data': processing_info['grounding']})}\n\n"
-            # Stream response chunks
-            simulated_response = f"Analyzed query using model {selected_model}. Here is your answer: {combined_text}"
-            for i, word in enumerate(simulated_response.split()):
-                chunk = {"event": "chunk", "data": {"content": word + " ", "index": i}}
-                yield f"data: {json.dumps(chunk)}\n\n"
+            # Real token streaming from the router (user's model + BYOK key). The
+            # router only falls back to a mock stream when no key is present.
+            try:
+                async with httpx.AsyncClient(timeout=None) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{ROUTER_SERVICE_URL}/generate",
+                        json={"model": selected_model, "messages": gen_messages, "stream": True},
+                        headers=downstream_headers,
+                    ) as resp:
+                        async for line in resp.aiter_lines():
+                            if not line.startswith("data: "):
+                                continue
+                            data = line[6:].strip()
+                            if not data or data == "[DONE]":
+                                continue
+                            try:
+                                obj = json.loads(data)
+                                content = obj.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            except Exception:
+                                content = ""
+                            if content:
+                                yield f"data: {json.dumps({'event': 'chunk', 'data': {'content': content}})}\n\n"
+            except Exception as exc:
+                logger.warning(f"Streaming generation failed: {exc}")
             yield f"data: {json.dumps({'event': 'complete', 'data': {'finish_reason': 'stop'}})}\n\n"
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-    # Non-streaming response generation. Prepend web-search context when grounded.
-    gen_messages = [{"role": "user", "content": combined_text}]
-    if grounding["context"]:
-        gen_messages.insert(0, {"role": "system", "content": grounding["context"]})
-
+    # Non-streaming response generation.
     gen_res = {}
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:

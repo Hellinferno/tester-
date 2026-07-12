@@ -17,9 +17,10 @@ class SLMAnalysisEngine:
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY", "")
-        # Configurable analysis SLM (ANALYSIS_SLM_MODEL env var); falls back to
-        # the default cheap/fast model when unset.
-        self.model = os.getenv("ANALYSIS_SLM_MODEL", "meta-llama/llama-3.1-8b-instruct")
+        # No preset model. The analysis model comes from the request (the user's
+        # chosen model) or an optional operator-set ANALYSIS_SLM_MODEL env; when
+        # neither is present we use the offline heuristic (no LLM call).
+        self.model = os.getenv("ANALYSIS_SLM_MODEL") or None
         self.selector = InstructionProfileSelector()
 
     async def analyze(
@@ -29,17 +30,21 @@ class SLMAnalysisEngine:
         has_image: bool = False,
         has_voice: bool = False,
         api_key: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Perform comprehensive SLM analysis of query.
 
-        `api_key` is the caller's per-request (BYOK) OpenRouter key; when absent
-        we fall back to the engine default, then to the offline heuristic.
+        `api_key` is the caller's per-request (BYOK) OpenRouter key and `model`
+        the user's chosen model. Remote SLM analysis runs only when BOTH are
+        present; otherwise we use the offline heuristic (no preset model).
         """
         effective_key = api_key or self.api_key
-        # If a key is available, attempt remote SLM analysis via OpenRouter Llama 3.1 8B
-        if effective_key:
+        effective_model = model or self.model
+        if effective_key and effective_model:
             try:
-                remote_result = await self._analyze_via_openrouter(text, modality, effective_key)
+                remote_result = await self._analyze_via_openrouter(
+                    text, modality, effective_key, effective_model
+                )
                 if remote_result:
                     return remote_result
             except Exception as exc:
@@ -63,7 +68,7 @@ class SLMAnalysisEngine:
         return {"requires_thinking": requires, "thinking_tokens": tokens}
 
     async def _analyze_via_openrouter(
-        self, text: str, modality: str, api_key: str
+        self, text: str, modality: str, api_key: str, model: str
     ) -> Optional[Dict[str, Any]]:
         url = "https://openrouter.ai/api/v1/chat/completions"
         prompt = (
@@ -81,7 +86,7 @@ class SLMAnalysisEngine:
             "X-Title": "SLM Router",
         }
         payload = {
-            "model": self.model,
+            "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
             "response_format": {"type": "json_object"},

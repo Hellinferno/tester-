@@ -32,10 +32,14 @@ async def serpapi_search(query: str, api_key: str, num: int = 5) -> Dict[str, An
             resp = await client.get(SERPAPI_URL, params=params)
             resp.raise_for_status()
             data = resp.json()
+    except httpx.HTTPStatusError as exc:
+        # Log only the status code — never str(exc), which embeds the request
+        # URL (and thus the api_key).
+        logger.warning("SerpAPI grounding failed: HTTP %s", exc.response.status_code)
+        return empty
     except Exception as exc:
-        # httpx errors embed the request URL (which carries api_key) — redact it
-        # so the SerpAPI key never lands in logs.
-        logger.warning("SerpAPI grounding failed: %s", str(exc).replace(api_key, "***"))
+        # Log only the exception type, never its message/URL (avoids key leakage).
+        logger.warning("SerpAPI grounding failed: %s", type(exc).__name__)
         return empty
 
     results: List[Dict[str, Any]] = data.get("organic_results", []) or []
