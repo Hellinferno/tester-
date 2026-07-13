@@ -5,7 +5,9 @@ import { AlertTriangle, Check, Download, FolderOpen, ImageIcon, Loader2, Mic, Pl
 import { ModelInput } from './ModelInput';
 import { StageBlock } from './StageBlock';
 import { fetchModelsCached, fileToAudio, fileToDataURL, modelInputs, OrModel, PipelineResult, pricingFor, runPipeline } from '../lib/openrouter';
-import { getOpenRouterKey, getStored, setStored } from '../lib/settings';
+import { fetchGeminiModels } from '../lib/gemini';
+import { getGeminiKey, getOpenRouterKey, getStored, setStored } from '../lib/settings';
+import { useProvider } from '../lib/providerContext';
 
 type EvalImage = { name: string; dataUrl: string };
 type EvalVoice = { name: string; data: string; format: string };
@@ -18,6 +20,7 @@ let idSeq = 0;
 const fmtUsd = (c: number) => '$' + c.toFixed(c >= 0.01 ? 4 : 6);
 
 export const EvalsConsole: React.FC = () => {
+  const { provider } = useProvider();
   const [models, setModels] = useState<string[]>([]);
   const [modelDraft, setModelDraft] = useState('');
   const [temperature, setTemperature] = useState(0.2);
@@ -45,8 +48,10 @@ export const EvalsConsole: React.FC = () => {
     setTimeoutSec(getStored('or.eval.timeout', 90));
     setMaxTokens(getStored('or.eval.maxtok', 0));
     setWebSearch(getStored('or.eval.web', false));
-    fetchModelsCached().then(setModelList);
   }, []);
+  useEffect(() => {
+    (provider === 'gemini' ? fetchGeminiModels(getGeminiKey()) : fetchModelsCached()).then(setModelList);
+  }, [provider]);
   useEffect(() => setStored('or.eval.models', models), [models]);
   useEffect(() => setStored('or.eval.temp', temperature), [temperature]);
   useEffect(() => setStored('or.eval.timeout', timeoutSec), [timeoutSec]);
@@ -95,8 +100,8 @@ export const EvalsConsole: React.FC = () => {
 
   const runAll = async () => {
     setError('');
-    const apiKey = getOpenRouterKey();
-    if (!apiKey) return setError('Add your OpenRouter key in the sidebar first.');
+    const apiKey = provider === 'gemini' ? getGeminiKey() : getOpenRouterKey();
+    if (!apiKey) return setError(`Add your ${provider === 'gemini' ? 'Gemini' : 'OpenRouter'} key in the sidebar first.`);
     if (!models.length) return setError('Add at least one model to compare.');
     if (!inputs.length) return setError('Add at least one input.');
 
@@ -121,6 +126,7 @@ export const EvalsConsole: React.FC = () => {
         const result = await runPipeline({
           model,
           apiKey,
+          provider,
           temperature,
           webSearch,
           prompt: input.prompt,

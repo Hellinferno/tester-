@@ -2,6 +2,11 @@
 // STT (audio), analysis — is a chat-completions call; modality is just the
 // content parts you attach. Web search uses OpenRouter's built-in `web` plugin.
 
+import { abortMessage, errorDetail, makeSignal } from './signal';
+import { geminiChat, geminiChatStream } from './gemini';
+
+export type Provider = 'openrouter' | 'gemini';
+
 export const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 
 export type ContentPart =
@@ -24,52 +29,12 @@ export interface ChatOptions {
   model: string;
   messages: ChatMessage[];
   apiKey: string;
+  provider?: Provider;
   temperature?: number;
   webSearch?: boolean;
   maxTokens?: number;
   signal?: AbortSignal;
   timeoutMs?: number;
-}
-
-/** Combine an optional external abort signal with an optional timeout, and hand
- *  back a cleanup so the timer/listener don't leak once the call finishes. */
-function makeSignal(
-  external?: AbortSignal,
-  timeoutMs?: number,
-): { signal: AbortSignal | undefined; done: () => void } {
-  if (!external && !timeoutMs) return { signal: undefined, done: () => {} };
-  const ctrl = new AbortController();
-  const cleanups: Array<() => void> = [];
-  if (external) {
-    if (external.aborted) ctrl.abort((external as any).reason);
-    else {
-      const h = () => ctrl.abort((external as any).reason);
-      external.addEventListener('abort', h, { once: true });
-      cleanups.push(() => external.removeEventListener('abort', h));
-    }
-  }
-  if (timeoutMs) {
-    const t = setTimeout(() => ctrl.abort(new DOMException('Request timed out', 'TimeoutError')), timeoutMs);
-    cleanups.push(() => clearTimeout(t));
-  }
-  return { signal: ctrl.signal, done: () => cleanups.forEach((c) => c()) };
-}
-
-function abortMessage(e: any): string | null {
-  if (e?.name === 'TimeoutError') return 'Timed out';
-  if (e?.name === 'AbortError') return 'Aborted';
-  return null;
-}
-
-/** Pull the human-readable message out of an OpenRouter JSON error body. */
-function errorDetail(detail: string): string {
-  try {
-    const j = JSON.parse(detail);
-    if (j?.error?.message) return String(j.error.message);
-  } catch {
-    /* not JSON */
-  }
-  return detail.slice(0, 300);
 }
 
 function headers(apiKey: string): Record<string, string> {
@@ -103,6 +68,7 @@ export interface ChatResult {
 
 /** Non-streaming completion. Returns text + usage + latency; never throws. */
 export async function chat(opts: ChatOptions): Promise<ChatResult> {
+  if (opts.provider === 'gemini') return geminiChat(opts);
   const start = Date.now();
   if (!opts.apiKey) return { text: '', latencyMs: 0, error: 'No OpenRouter key set' };
   const { signal, done } = makeSignal(opts.signal, opts.timeoutMs);
@@ -138,6 +104,10 @@ export async function* chatStream(
   opts: ChatOptions,
   onDone?: (m: StreamMeta) => void,
 ): AsyncGenerator<string> {
+  if (opts.provider === 'gemini') {
+    yield* geminiChatStream(opts, onDone);
+    return;
+  }
   if (!opts.apiKey) throw new Error('No OpenRouter key set');
   const start = Date.now();
   let usage: Usage | undefined;
@@ -253,6 +223,7 @@ export interface PipelineResult {
 export interface PipelineInput {
   model: string;
   apiKey: string;
+  provider?: Provider;
   prompt: string;
   temperature?: number;
   webSearch?: boolean;
@@ -281,6 +252,7 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
     const r = await chat({
       model: inp.model,
       apiKey: inp.apiKey,
+      provider: inp.provider,
       temperature: 0,
       signal: inp.signal,
       timeoutMs: inp.timeoutMs,
@@ -301,6 +273,7 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
     const r = await chat({
       model: inp.model,
       apiKey: inp.apiKey,
+      provider: inp.provider,
       temperature: 0,
       signal: inp.signal,
       timeoutMs: inp.timeoutMs,
@@ -318,6 +291,7 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
   const r = await chat({
     model: inp.model,
     apiKey: inp.apiKey,
+    provider: inp.provider,
     temperature: inp.temperature,
     webSearch: inp.webSearch,
     signal: inp.signal,

@@ -1,20 +1,23 @@
 'use client';
 
 import React, { useEffect, useId, useState } from 'react';
-import { fetchModelsCached, OrModel } from '../lib/openrouter';
-import { getStored, setStored } from '../lib/settings';
+import { fetchModelsCached, OrModel, Provider } from '../lib/openrouter';
+import { fetchGeminiModels } from '../lib/gemini';
+import { getGeminiKey, getStored, setStored } from '../lib/settings';
+import { useProvider } from '../lib/providerContext';
 
-function useLiveModels(): OrModel[] {
+function useLiveModels(provider: Provider): OrModel[] {
   const [models, setModels] = useState<OrModel[]>([]);
   useEffect(() => {
     let alive = true;
-    fetchModelsCached().then((m) => {
+    const load = provider === 'gemini' ? fetchGeminiModels(getGeminiKey()) : fetchModelsCached();
+    load.then((m) => {
       if (alive) setModels(m);
     });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [provider]);
   return models;
 }
 
@@ -30,7 +33,8 @@ interface ModelInputProps {
  *  "vision only" is on (shared preference), the list is filtered to
  *  image-capable models — the ones that can do OCR. */
 export const ModelInput: React.FC<ModelInputProps> = ({ value, onChange, placeholder, onEnter, showVisionToggle }) => {
-  const all = useLiveModels();
+  const { provider } = useProvider();
+  const all = useLiveModels(provider);
   const [visionOnly, setVisionOnly] = useState(false);
   const listId = useId();
 

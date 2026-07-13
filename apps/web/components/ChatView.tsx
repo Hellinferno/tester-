@@ -18,7 +18,9 @@ import {
   usdCost,
   userMessage,
 } from '../lib/openrouter';
-import { getOpenRouterKey, getStored, setStored } from '../lib/settings';
+import { fetchGeminiModels } from '../lib/gemini';
+import { getGeminiKey, getOpenRouterKey, getStored, setStored } from '../lib/settings';
+import { useProvider } from '../lib/providerContext';
 
 type Turn = {
   role: 'user' | 'assistant';
@@ -32,6 +34,7 @@ type Turn = {
 const fmtUsd = (c: number) => '$' + c.toFixed(c >= 0.01 ? 4 : 6);
 
 export const ChatView: React.FC = () => {
+  const { provider } = useProvider();
   const [model, setModel] = useState('');
   const [temperature, setTemperature] = useState(0.7);
   const [timeoutSec, setTimeoutSec] = useState(90);
@@ -61,8 +64,10 @@ export const ChatView: React.FC = () => {
     setMaxTokens(getStored('or.chat.maxtok', 0));
     setWebSearch(getStored('or.chat.web', false));
     setSystemPrompt(getStored('or.chat.system', ''));
-    fetchModelsCached().then(setModelList);
   }, []);
+  useEffect(() => {
+    (provider === 'gemini' ? fetchGeminiModels(getGeminiKey()) : fetchModelsCached()).then(setModelList);
+  }, [provider]);
   useEffect(() => setStored('or.chat.model', model), [model]);
   useEffect(() => setStored('or.chat.temp', temperature), [temperature]);
   useEffect(() => setStored('or.chat.timeout', timeoutSec), [timeoutSec]);
@@ -79,8 +84,8 @@ export const ChatView: React.FC = () => {
   const handleSend = async () => {
     if (!canSend) return;
     setError('');
-    const apiKey = getOpenRouterKey();
-    if (!apiKey) return setError('Add your OpenRouter key in the sidebar first.');
+    const apiKey = provider === 'gemini' ? getGeminiKey() : getOpenRouterKey();
+    if (!apiKey) return setError(`Add your ${provider === 'gemini' ? 'Gemini' : 'OpenRouter'} key in the sidebar first.`);
     if (!model.trim()) return setError('Pick a model in Run settings.');
 
     const hasMedia = images.length > 0 || !!audio;
@@ -113,6 +118,7 @@ export const ChatView: React.FC = () => {
       const result = await runPipeline({
         model,
         apiKey,
+        provider,
         temperature,
         webSearch,
         prompt: promptText,
@@ -146,7 +152,7 @@ export const ChatView: React.FC = () => {
     let meta: StreamMeta | undefined;
     try {
       for await (const delta of chatStream(
-        { model, messages, apiKey, temperature, webSearch, maxTokens, signal: controller.signal, timeoutMs },
+        { model, messages, apiKey, provider, temperature, webSearch, maxTokens, signal: controller.signal, timeoutMs },
         (m) => {
           meta = m;
         },
