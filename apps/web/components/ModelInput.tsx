@@ -2,6 +2,7 @@
 
 import React, { useEffect, useId, useState } from 'react';
 import { fetchModelsCached, OrModel } from '../lib/openrouter';
+import { getStored, setStored } from '../lib/settings';
 
 function useLiveModels(): OrModel[] {
   const [models, setModels] = useState<OrModel[]>([]);
@@ -22,14 +23,23 @@ interface ModelInputProps {
   onChange: (v: string) => void;
   placeholder?: string;
   onEnter?: () => void;
+  showVisionToggle?: boolean;
 }
 
-/** Model id input with autocomplete over the live OpenRouter model list. */
-export const ModelInput: React.FC<ModelInputProps> = ({ value, onChange, placeholder, onEnter }) => {
-  const models = useLiveModels();
+/** Model id input with autocomplete over the live OpenRouter model list. When
+ *  "vision only" is on (shared preference), the list is filtered to
+ *  image-capable models — the ones that can do OCR. */
+export const ModelInput: React.FC<ModelInputProps> = ({ value, onChange, placeholder, onEnter, showVisionToggle }) => {
+  const all = useLiveModels();
+  const [visionOnly, setVisionOnly] = useState(false);
   const listId = useId();
+
+  useEffect(() => setVisionOnly(getStored('or.model.visionOnly', false)), []);
+
+  const models = visionOnly ? all.filter((m) => m.inputs?.includes('image')) : all;
+
   return (
-    <>
+    <div>
       <input
         list={listId}
         value={value}
@@ -50,6 +60,20 @@ export const ModelInput: React.FC<ModelInputProps> = ({ value, onChange, placeho
           </option>
         ))}
       </datalist>
-    </>
+      {showVisionToggle && (
+        <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-xs text-studio-muted">
+          <input
+            type="checkbox"
+            checked={visionOnly}
+            onChange={(e) => {
+              setVisionOnly(e.target.checked);
+              setStored('or.model.visionOnly', e.target.checked);
+            }}
+            className="h-3 w-3 accent-studio-blue"
+          />
+          Vision models only (image / OCR)
+        </label>
+      )}
+    </div>
   );
 };

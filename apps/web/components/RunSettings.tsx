@@ -61,7 +61,7 @@ export const RunSettings: React.FC<RunSettingsProps> = ({
       <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
         <section>
           <label className="mb-1.5 block text-xs font-medium text-studio-muted">Model</label>
-          <ModelInput value={model} onChange={setModel} />
+          <ModelInput value={model} onChange={setModel} showVisionToggle />
           <p className="mt-1.5 text-xs text-studio-faint">Any OpenRouter model — vision models also do OCR.</p>
         </section>
 
