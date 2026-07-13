@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Activity, MessageSquare, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { FlaskConical, MessageSquare, Sparkles } from 'lucide-react';
 import { SettingsPanel } from './SettingsPanel/SettingsPanel';
 
 interface SidebarProps {
@@ -10,9 +10,8 @@ interface SidebarProps {
 }
 
 const NAV = [
-  { id: 'query', label: 'Chat', icon: MessageSquare },
-  { id: 'system-instructions', label: 'System instructions', icon: SlidersHorizontal },
-  { id: 'analytics', label: 'Processing & routing', icon: Activity },
+  { id: 'chat', label: 'Chat', icon: MessageSquare },
+  { id: 'evals', label: 'Evals', icon: FlaskConical },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
@@ -37,9 +36,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
               key={item.id}
               onClick={() => setActiveTab(item.id)}
               className={`flex w-full items-center gap-3 rounded-full px-4 py-2.5 text-sm transition-colors ${
-                active
-                  ? 'bg-studio-bluesoft font-medium text-studio-bluetext'
-                  : 'text-studio-text hover:bg-studio-hover'
+                active ? 'bg-studio-bluesoft font-medium text-studio-bluetext' : 'text-studio-text hover:bg-studio-hover'
               }`}
             >
               <Icon className={`h-[18px] w-[18px] ${active ? 'text-studio-bluetext' : 'text-studio-muted'}`} />

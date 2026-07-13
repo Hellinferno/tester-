@@ -23,9 +23,23 @@ export function hasOpenRouterKey(): boolean {
   return getOpenRouterKey().length > 0;
 }
 
-// Base URL the browser uses to reach the orchestrator (Render URL in prod).
-export const ORCHESTRATOR_URL =
-  process.env.NEXT_PUBLIC_ORCHESTRATOR_URL || 'http://localhost:8001';
+// Generic localStorage JSON store (SSR-safe). Used to persist model choices,
+// system prompt, temperature, etc. across sessions.
+export function getStored<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const v = window.localStorage.getItem(key);
+    return v === null ? fallback : (JSON.parse(v) as T);
+  } catch {
+    return fallback;
+  }
+}
 
-// Default generation model: 'auto' = smart routing, or an OpenRouter model id.
-export const DEFAULT_MODEL = process.env.NEXT_PUBLIC_DEFAULT_MODEL || 'auto';
+export function setStored<T>(key: string, value: T): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* quota / private mode — ignore */
+  }
+}
