@@ -60,6 +60,17 @@ function abortMessage(e: any): string | null {
   return null;
 }
 
+/** Pull the human-readable message out of an OpenRouter JSON error body. */
+function errorDetail(detail: string): string {
+  try {
+    const j = JSON.parse(detail);
+    if (j?.error?.message) return String(j.error.message);
+  } catch {
+    /* not JSON */
+  }
+  return detail.slice(0, 300);
+}
+
 function headers(apiKey: string): Record<string, string> {
   return {
     Authorization: `Bearer ${apiKey}`,
@@ -103,7 +114,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
     const latencyMs = Date.now() - start;
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
-      return { text: '', latencyMs, error: `HTTP ${res.status}: ${detail.slice(0, 300)}` };
+      return { text: '', latencyMs, error: `HTTP ${res.status}: ${errorDetail(detail)}` };
     }
     const json = await res.json();
     return { text: json.choices?.[0]?.message?.content ?? '', usage: json.usage, latencyMs };
@@ -145,7 +156,7 @@ export async function* chatStream(
     });
     if (!res.ok || !res.body) {
       const detail = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status}: ${detail.slice(0, 300)}`);
+      throw new Error(`HTTP ${res.status}: ${errorDetail(detail)}`);
     }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -213,6 +224,7 @@ export interface OrModel {
   id: string;
   name?: string;
   pricing?: { prompt: number; completion: number };
+  inputs?: string[];
 }
 
 // ── Staged pipeline: OCR / STT run as their own visible steps ─────────
@@ -328,6 +340,7 @@ export async function fetchModels(): Promise<OrModel[]> {
         pricing: m.pricing
           ? { prompt: Number(m.pricing.prompt) || 0, completion: Number(m.pricing.completion) || 0 }
           : undefined,
+        inputs: Array.isArray(m.architecture?.input_modalities) ? m.architecture.input_modalities : undefined,
       }))
       .sort((a: OrModel, b: OrModel) => a.id.localeCompare(b.id));
   } catch {
@@ -351,6 +364,13 @@ export function fetchModelsCached(): Promise<OrModel[]> {
 
 export function pricingFor(models: OrModel[], id: string): { prompt: number; completion: number } | undefined {
   return models.find((m) => m.id === id)?.pricing;
+}
+
+/** Input modalities the model accepts, or undefined if unknown (custom id / not
+ *  in the fetched list). Used to warn before sending images/audio to a
+ *  text-only model. */
+export function modelInputs(models: OrModel[], id: string): string[] | undefined {
+  return models.find((m) => m.id === id)?.inputs;
 }
 
 export function usdCost(usage: Usage | undefined, pricing?: { prompt: number; completion: number }): number {

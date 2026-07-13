@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, Download, FolderOpen, ImageIcon, Loader2, Mic, Play, Plus, Save, Square, X } from 'lucide-react';
+import { AlertTriangle, Check, Download, FolderOpen, ImageIcon, Loader2, Mic, Play, Plus, Save, Square, X } from 'lucide-react';
 import { ModelInput } from './ModelInput';
 import { StageBlock } from './StageBlock';
-import { fetchModelsCached, fileToAudio, fileToDataURL, OrModel, PipelineResult, pricingFor, runPipeline } from '../lib/openrouter';
+import { fetchModelsCached, fileToAudio, fileToDataURL, modelInputs, OrModel, PipelineResult, pricingFor, runPipeline } from '../lib/openrouter';
 import { getOpenRouterKey, getStored, setStored } from '../lib/settings';
 
 type EvalImage = { name: string; dataUrl: string };
@@ -86,6 +86,9 @@ export const EvalsConsole: React.FC = () => {
 
   const setCell = (inputId: string, model: string, cell: Cell) =>
     setResults((prev) => ({ ...prev, [inputId]: { ...prev[inputId], [model]: cell } }));
+
+  const hasImageInputs = inputs.some((i) => i.images.length > 0);
+  const hasVoiceInputs = inputs.some((i) => i.voice);
 
   const runAll = async () => {
     setError('');
@@ -246,14 +249,25 @@ export const EvalsConsole: React.FC = () => {
         <div className="mb-6 rounded-xl border border-studio-border bg-studio-surface p-4">
           <label className="mb-1.5 block text-xs font-medium text-studio-muted">Models to compare</label>
           <div className="flex flex-wrap items-center gap-2">
-            {models.map((m) => (
-              <span key={m} className="flex items-center gap-1.5 rounded-full bg-studio-bluesoft px-3 py-1 text-xs text-studio-bluetext">
-                {m}
-                <button onClick={() => setModels(models.filter((x) => x !== m))}>
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
+            {models.map((m) => {
+              const caps = modelInputs(modelList, m);
+              const missing: string[] = [];
+              if (hasImageInputs && caps && !caps.includes('image')) missing.push('image');
+              if (hasVoiceInputs && caps && !caps.includes('audio')) missing.push('audio');
+              return (
+                <span key={m} className="flex items-center gap-1.5 rounded-full bg-studio-bluesoft px-3 py-1 text-xs text-studio-bluetext">
+                  {m}
+                  {missing.length > 0 && (
+                    <span title={`No ${missing.join(' / ')} input — pick a ${missing.join('/')}-capable model`} className="flex">
+                      <AlertTriangle className="h-3 w-3 text-amber-500" />
+                    </span>
+                  )}
+                  <button onClick={() => setModels(models.filter((x) => x !== m))}>
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              );
+            })}
           </div>
           <div className="mt-2 flex gap-2">
             <div className="flex-1">
