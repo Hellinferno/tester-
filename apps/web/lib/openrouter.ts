@@ -212,6 +212,7 @@ export async function fileToAudio(file: File): Promise<{ data: string; format: s
 export interface OrModel {
   id: string;
   name?: string;
+  pricing?: { prompt: number; completion: number };
 }
 
 // ── Staged pipeline: OCR / STT run as their own visible steps ─────────
@@ -231,6 +232,7 @@ export interface PipelineResult {
   answer: string;
   totalLatencyMs: number;
   totalTokens: number;
+  totalCost?: number;
   error?: string;
 }
 
@@ -244,6 +246,7 @@ export interface PipelineInput {
   audio?: { data: string; format: string };
   signal?: AbortSignal;
   timeoutMs?: number;
+  pricing?: { prompt: number; completion: number };
 }
 
 const OCR_INSTRUCTION =
@@ -308,8 +311,9 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
 
   const totalLatencyMs = stages.reduce((s, x) => s + (x.latencyMs || 0), 0);
   const totalTokens = stages.reduce((s, x) => s + (x.usage?.total_tokens || 0), 0);
+  const totalCost = inp.pricing ? stages.reduce((s, x) => s + usdCost(x.usage, inp.pricing), 0) : undefined;
   const error = stages.find((s) => s.error)?.error;
-  return { stages, answer: r.text, totalLatencyMs, totalTokens, error };
+  return { stages, answer: r.text, totalLatencyMs, totalTokens, totalCost, error };
 }
 
 /** Live model list from OpenRouter (public; no key needed). */
@@ -318,9 +322,38 @@ export async function fetchModels(): Promise<OrModel[]> {
     const res = await fetch(`${OPENROUTER_BASE}/models`);
     const json = await res.json();
     return (json.data || [])
-      .map((m: any) => ({ id: m.id as string, name: m.name as string }))
+      .map((m: any) => ({
+        id: m.id as string,
+        name: m.name as string,
+        pricing: m.pricing
+          ? { prompt: Number(m.pricing.prompt) || 0, completion: Number(m.pricing.completion) || 0 }
+          : undefined,
+      }))
       .sort((a: OrModel, b: OrModel) => a.id.localeCompare(b.id));
   } catch {
     return [];
   }
+}
+
+let _modelsCache: OrModel[] | null = null;
+let _modelsInflight: Promise<OrModel[]> | null = null;
+
+/** Cached model list — shared by the pickers and the cost estimator. */
+export function fetchModelsCached(): Promise<OrModel[]> {
+  if (_modelsCache) return Promise.resolve(_modelsCache);
+  if (!_modelsInflight)
+    _modelsInflight = fetchModels().then((m) => {
+      _modelsCache = m;
+      return m;
+    });
+  return _modelsInflight;
+}
+
+export function pricingFor(models: OrModel[], id: string): { prompt: number; completion: number } | undefined {
+  return models.find((m) => m.id === id)?.pricing;
+}
+
+export function usdCost(usage: Usage | undefined, pricing?: { prompt: number; completion: number }): number {
+  if (!usage || !pricing) return 0;
+  return (usage.prompt_tokens || 0) * pricing.prompt + (usage.completion_tokens || 0) * pricing.completion;
 }

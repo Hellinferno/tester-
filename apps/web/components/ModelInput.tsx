@@ -1,23 +1,13 @@
 'use client';
 
 import React, { useEffect, useId, useState } from 'react';
-import { fetchModels, OrModel } from '../lib/openrouter';
-
-// Module-level cache so every picker shares one live model fetch.
-let cache: OrModel[] | null = null;
-let inflight: Promise<OrModel[]> | null = null;
+import { fetchModelsCached, OrModel } from '../lib/openrouter';
 
 function useLiveModels(): OrModel[] {
-  const [models, setModels] = useState<OrModel[]>(cache || []);
+  const [models, setModels] = useState<OrModel[]>([]);
   useEffect(() => {
-    if (cache) {
-      setModels(cache);
-      return;
-    }
-    if (!inflight) inflight = fetchModels();
     let alive = true;
-    inflight.then((m) => {
-      cache = m;
+    fetchModelsCached().then((m) => {
       if (alive) setModels(m);
     });
     return () => {

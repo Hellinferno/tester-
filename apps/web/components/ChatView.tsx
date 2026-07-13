@@ -6,12 +6,16 @@ import { RunSettings } from './RunSettings';
 import { StageBlock } from './StageBlock';
 import {
   ChatMessage,
+  OrModel,
   Stage,
   StreamMeta,
   chatStream,
+  fetchModelsCached,
   fileToAudio,
   fileToDataURL,
+  pricingFor,
   runPipeline,
+  usdCost,
   userMessage,
 } from '../lib/openrouter';
 import { getOpenRouterKey, getStored, setStored } from '../lib/settings';
@@ -22,8 +26,10 @@ type Turn = {
   imageThumbs?: string[];
   audioName?: string;
   stages?: Stage[];
-  metrics?: { tokens?: number; latencyMs?: number };
+  metrics?: { tokens?: number; latencyMs?: number; cost?: number };
 };
+
+const fmtUsd = (c: number) => '$' + c.toFixed(c >= 0.01 ? 4 : 6);
 
 export const ChatView: React.FC = () => {
   const [model, setModel] = useState('');
@@ -39,6 +45,7 @@ export const ChatView: React.FC = () => {
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState('');
   const [error, setError] = useState('');
+  const [modelList, setModelList] = useState<OrModel[]>([]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
@@ -52,6 +59,7 @@ export const ChatView: React.FC = () => {
     setTimeoutSec(getStored('or.chat.timeout', 90));
     setWebSearch(getStored('or.chat.web', false));
     setSystemPrompt(getStored('or.chat.system', ''));
+    fetchModelsCached().then(setModelList);
   }, []);
   useEffect(() => setStored('or.chat.model', model), [model]);
   useEffect(() => setStored('or.chat.temp', temperature), [temperature]);
@@ -95,6 +103,7 @@ export const ChatView: React.FC = () => {
     const controller = new AbortController();
     abortRef.current = controller;
     const timeoutMs = timeoutSec > 0 ? timeoutSec * 1000 : undefined;
+    const pricing = pricingFor(modelList, model);
 
     if (hasMedia) {
       // Staged pipeline: OCR (per image) / STT run as visible steps with metrics.
@@ -106,6 +115,7 @@ export const ChatView: React.FC = () => {
         prompt: promptText,
         images: imageDataUrls,
         audio: audioPart,
+        pricing,
         signal: controller.signal,
         timeoutMs,
       });
@@ -115,7 +125,7 @@ export const ChatView: React.FC = () => {
           role: 'assistant',
           text: result.answer,
           stages: result.stages,
-          metrics: { tokens: result.totalTokens, latencyMs: result.totalLatencyMs },
+          metrics: { tokens: result.totalTokens, latencyMs: result.totalLatencyMs, cost: result.totalCost },
         },
       ]);
       setStreaming(false);
@@ -142,7 +152,15 @@ export const ChatView: React.FC = () => {
       }
       setTurns([
         ...history,
-        { role: 'assistant', text: acc, metrics: { tokens: meta?.usage?.total_tokens, latencyMs: meta?.latencyMs } },
+        {
+          role: 'assistant',
+          text: acc,
+          metrics: {
+            tokens: meta?.usage?.total_tokens,
+            latencyMs: meta?.latencyMs,
+            cost: pricing ? usdCost(meta?.usage, pricing) : undefined,
+          },
+        },
       ]);
     } catch (e: any) {
       setTurns([...history, { role: 'assistant', text: acc || `⚠ ${String(e?.message || e)}` }]);
@@ -222,6 +240,7 @@ export const ChatView: React.FC = () => {
                               <div className="px-1 text-[11px] text-studio-faint">
                                 total {t.metrics.tokens ? `${t.metrics.tokens} tok · ` : ''}
                                 {t.metrics.latencyMs} ms
+                                {t.metrics.cost != null ? ` · ${fmtUsd(t.metrics.cost)}` : ''}
                               </div>
                             )}
                           </div>
@@ -232,6 +251,7 @@ export const ChatView: React.FC = () => {
                               <div className="mt-1 text-[11px] text-studio-faint">
                                 {t.metrics.tokens != null ? `${t.metrics.tokens} tok · ` : ''}
                                 {t.metrics.latencyMs} ms
+                                {t.metrics.cost != null ? ` · ${fmtUsd(t.metrics.cost)}` : ''}
                               </div>
                             )}
                           </>

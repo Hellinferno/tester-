@@ -1,18 +1,21 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, Download, ImageIcon, Loader2, Mic, Play, Plus, Square, X } from 'lucide-react';
+import { Check, Download, FolderOpen, ImageIcon, Loader2, Mic, Play, Plus, Save, Square, X } from 'lucide-react';
 import { ModelInput } from './ModelInput';
 import { StageBlock } from './StageBlock';
-import { fileToAudio, fileToDataURL, PipelineResult, runPipeline } from '../lib/openrouter';
+import { fetchModelsCached, fileToAudio, fileToDataURL, OrModel, PipelineResult, pricingFor, runPipeline } from '../lib/openrouter';
 import { getOpenRouterKey, getStored, setStored } from '../lib/settings';
 
-type EvalImage = { file: File; dataUrl: string };
-type EvalInput = { id: string; images: EvalImage[]; voice: File | null; prompt: string };
+type EvalImage = { name: string; dataUrl: string };
+type EvalVoice = { name: string; data: string; format: string };
+type EvalInput = { id: string; images: EvalImage[]; voice: EvalVoice | null; prompt: string };
 type Cell = { status: 'idle' | 'running' | 'done' | 'error'; result?: PipelineResult };
 type Results = Record<string, Record<string, Cell>>;
 
 let idSeq = 0;
+
+const fmtUsd = (c: number) => '$' + c.toFixed(c >= 0.01 ? 4 : 6);
 
 export const EvalsConsole: React.FC = () => {
   const [models, setModels] = useState<string[]>([]);
@@ -24,12 +27,15 @@ export const EvalsConsole: React.FC = () => {
   const [results, setResults] = useState<Results>({});
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState('');
+  const [totalCost, setTotalCost] = useState(0);
   const [error, setError] = useState('');
+  const [modelList, setModelList] = useState<OrModel[]>([]);
   const stopRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const bulkInput = useRef<HTMLInputElement>(null);
   const itemImageInput = useRef<HTMLInputElement>(null);
   const itemVoiceInput = useRef<HTMLInputElement>(null);
+  const datasetInput = useRef<HTMLInputElement>(null);
   const targetItem = useRef<string>('');
 
   useEffect(() => {
@@ -37,6 +43,7 @@ export const EvalsConsole: React.FC = () => {
     setTemperature(getStored('or.eval.temp', 0.2));
     setTimeoutSec(getStored('or.eval.timeout', 90));
     setWebSearch(getStored('or.eval.web', false));
+    fetchModelsCached().then(setModelList);
   }, []);
   useEffect(() => setStored('or.eval.models', models), [models]);
   useEffect(() => setStored('or.eval.temp', temperature), [temperature]);
@@ -46,14 +53,13 @@ export const EvalsConsole: React.FC = () => {
   const updateItem = (id: string, patch: Partial<EvalInput>) =>
     setInputs((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
 
-  const addBlankInput = () =>
-    setInputs((prev) => [...prev, { id: `in-${++idSeq}`, images: [], voice: null, prompt: '' }]);
+  const addBlankInput = () => setInputs((prev) => [...prev, { id: `in-${++idSeq}`, images: [], voice: null, prompt: '' }]);
 
   const addBulkImages = async (files: FileList | null) => {
     if (!files) return;
     const items: EvalInput[] = [];
     for (const file of Array.from(files)) {
-      items.push({ id: `in-${++idSeq}`, images: [{ file, dataUrl: await fileToDataURL(file) }], voice: null, prompt: '' });
+      items.push({ id: `in-${++idSeq}`, images: [{ name: file.name, dataUrl: await fileToDataURL(file) }], voice: null, prompt: '' });
     }
     setInputs((prev) => [...prev, ...items]);
   };
@@ -62,8 +68,14 @@ export const EvalsConsole: React.FC = () => {
     const id = targetItem.current;
     if (!files || !id) return;
     const imgs: EvalImage[] = [];
-    for (const file of Array.from(files)) imgs.push({ file, dataUrl: await fileToDataURL(file) });
+    for (const file of Array.from(files)) imgs.push({ name: file.name, dataUrl: await fileToDataURL(file) });
     setInputs((prev) => prev.map((it) => (it.id === id ? { ...it, images: [...it.images, ...imgs] } : it)));
+  };
+
+  const setVoiceForTarget = async (file: File | null) => {
+    const id = targetItem.current;
+    if (!id) return;
+    updateItem(id, { voice: file ? { name: file.name, ...(await fileToAudio(file)) } : null });
   };
 
   const addModel = () => {
@@ -87,19 +99,34 @@ export const EvalsConsole: React.FC = () => {
     abortRef.current = controller;
     setRunning(true);
     setResults({});
+    setTotalCost(0);
     const total = inputs.length * models.length;
     const timeoutMs = timeoutSec > 0 ? timeoutSec * 1000 : undefined;
     let done = 0;
+    let cost = 0;
 
     outer: for (const input of inputs) {
-      const audioPart = input.voice ? await fileToAudio(input.voice) : undefined;
+      const audioPart = input.voice ? { data: input.voice.data, format: input.voice.format } : undefined;
       const imageUrls = input.images.map((i) => i.dataUrl);
       for (const model of models) {
         if (stopRef.current) break outer;
         setCell(input.id, model, { status: 'running' });
         setProgress(`${done + 1} / ${total}`);
-        const result = await runPipeline({ model, apiKey, temperature, webSearch, prompt: input.prompt, images: imageUrls, audio: audioPart, signal: controller.signal, timeoutMs });
+        const result = await runPipeline({
+          model,
+          apiKey,
+          temperature,
+          webSearch,
+          prompt: input.prompt,
+          images: imageUrls,
+          audio: audioPart,
+          pricing: pricingFor(modelList, model),
+          signal: controller.signal,
+          timeoutMs,
+        });
         setCell(input.id, model, { status: result.error ? 'error' : 'done', result });
+        cost += result.totalCost || 0;
+        setTotalCost(cost);
         done++;
       }
     }
@@ -117,9 +144,38 @@ export const EvalsConsole: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const saveDataset = () => {
+    const data = { version: 1, models, temperature, timeoutSec, webSearch, inputs };
+    download('evals-dataset.json', JSON.stringify(data), 'application/json');
+  };
+
+  const loadDataset = async (file: File | null) => {
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (Array.isArray(data.models)) setModels(data.models);
+      if (typeof data.temperature === 'number') setTemperature(data.temperature);
+      if (typeof data.timeoutSec === 'number') setTimeoutSec(data.timeoutSec);
+      if (typeof data.webSearch === 'boolean') setWebSearch(data.webSearch);
+      if (Array.isArray(data.inputs)) {
+        setInputs(
+          data.inputs.map((it: EvalInput) => ({
+            id: `in-${++idSeq}`,
+            images: it.images || [],
+            voice: it.voice || null,
+            prompt: it.prompt || '',
+          })),
+        );
+        setResults({});
+      }
+    } catch (e) {
+      setError('Could not read that dataset file.');
+    }
+  };
+
   const exportJson = () => {
     const payload = inputs.map((inp) => ({
-      images: inp.images.map((i) => i.file.name),
+      images: inp.images.map((i) => i.name),
       voice: inp.voice?.name || null,
       prompt: inp.prompt,
       results: models.map((m) => {
@@ -130,6 +186,7 @@ export const EvalsConsole: React.FC = () => {
           stages: cell?.result?.stages,
           totalTokens: cell?.result?.totalTokens,
           totalLatencyMs: cell?.result?.totalLatencyMs,
+          totalCostUsd: cell?.result?.totalCost,
         };
       }),
     }));
@@ -138,7 +195,7 @@ export const EvalsConsole: React.FC = () => {
 
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['input', 'images', 'voice', 'prompt', 'model', 'status', 'ocr_read', 'stt_transcript', 'answer', 'total_tokens', 'total_ms'];
+    const header = ['input', 'images', 'voice', 'prompt', 'model', 'status', 'ocr_read', 'stt_transcript', 'answer', 'total_tokens', 'total_ms', 'cost_usd'];
     const rows = [header.map(esc).join(',')];
     inputs.forEach((inp, i) => {
       models.forEach((m) => {
@@ -148,19 +205,7 @@ export const EvalsConsole: React.FC = () => {
         const stt = stages.filter((s) => s.name === 'stt').map((s) => s.text).join('\n');
         const answer = stages.find((s) => s.name === 'answer')?.text || '';
         rows.push(
-          [
-            i + 1,
-            inp.images.map((x) => x.file.name).join('; '),
-            inp.voice?.name || '',
-            inp.prompt,
-            m,
-            cell?.status || '',
-            ocr,
-            stt,
-            answer,
-            cell?.result?.totalTokens ?? '',
-            cell?.result?.totalLatencyMs ?? '',
-          ]
+          [i + 1, inp.images.map((x) => x.name).join('; '), inp.voice?.name || '', inp.prompt, m, cell?.status || '', ocr, stt, answer, cell?.result?.totalTokens ?? '', cell?.result?.totalLatencyMs ?? '', cell?.result?.totalCost ?? '']
             .map(esc)
             .join(','),
         );
@@ -174,6 +219,7 @@ export const EvalsConsole: React.FC = () => {
       <header className="flex items-center justify-between border-b border-studio-line px-6 py-[13px]">
         <div className="font-display text-[15px] font-medium">Evals</div>
         <div className="flex items-center gap-2">
+          {totalCost > 0 && <span className="font-mono text-xs text-studio-muted">est. {fmtUsd(totalCost)}</span>}
           {progress && <span className="text-xs text-studio-muted">{progress}</span>}
           <button onClick={exportCsv} disabled={!inputs.length} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover disabled:opacity-40">
             <Download className="h-3.5 w-3.5" /> CSV
@@ -217,7 +263,7 @@ export const EvalsConsole: React.FC = () => {
               <Plus className="h-4 w-4" /> Add
             </button>
           </div>
-          <div className="mt-3 flex items-center gap-6">
+          <div className="mt-3 flex flex-wrap items-center gap-6">
             <label className="flex items-center gap-2 text-xs text-studio-muted">
               Temperature
               <input type="number" min={0} max={2} step={0.1} value={temperature} onChange={(e) => setTemperature(Math.min(2, Math.max(0, Number(e.target.value))))} className="w-14 rounded-md border border-studio-border bg-white px-2 py-1 text-right text-sm text-studio-text focus:border-studio-blue focus:outline-none" />
@@ -237,6 +283,12 @@ export const EvalsConsole: React.FC = () => {
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-xs font-medium text-studio-muted">Dataset — inputs ({inputs.length})</h3>
           <div className="flex gap-2">
+            <button onClick={saveDataset} disabled={!inputs.length} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover disabled:opacity-40">
+              <Save className="h-3.5 w-3.5" /> Save
+            </button>
+            <button onClick={() => datasetInput.current?.click()} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
+              <FolderOpen className="h-3.5 w-3.5" /> Load
+            </button>
             <button onClick={addBlankInput} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
               <Plus className="h-3.5 w-3.5" /> Add input
             </button>
@@ -248,7 +300,7 @@ export const EvalsConsole: React.FC = () => {
 
         {inputs.length === 0 ? (
           <div className="rounded-xl border border-dashed border-studio-border py-12 text-center text-sm text-studio-faint">
-            Each input can be image(s), text, voice, or all. Add inputs, pick models, then Run all.
+            Each input can be image(s), text, voice, or all. Add inputs (or Load a saved dataset), pick models, then Run all.
           </div>
         ) : (
           <div className="space-y-4">
@@ -261,12 +313,11 @@ export const EvalsConsole: React.FC = () => {
                   </button>
                 </div>
 
-                {/* images */}
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   {inp.images.map((im, i) => (
                     <div key={i} className="relative">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={im.dataUrl} alt={im.file.name} className="h-16 w-16 rounded-lg object-cover" />
+                      <img src={im.dataUrl} alt={im.name} className="h-16 w-16 rounded-lg object-cover" />
                       <button
                         onClick={() => updateItem(inp.id, { images: inp.images.filter((_, x) => x !== i) })}
                         className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-white text-studio-muted shadow ring-1 ring-studio-border hover:text-studio-text"
@@ -284,7 +335,6 @@ export const EvalsConsole: React.FC = () => {
                   </button>
                 </div>
 
-                {/* voice + prompt */}
                 <div className="mb-2 flex items-center gap-2">
                   {inp.voice ? (
                     <span className="flex items-center gap-1.5 rounded-full border border-studio-border bg-studio-surface px-3 py-1 text-xs">
@@ -310,7 +360,6 @@ export const EvalsConsole: React.FC = () => {
                   className="w-full resize-none rounded-lg border border-studio-border bg-white px-3 py-2 text-sm text-studio-text placeholder-studio-faint focus:border-studio-blue focus:outline-none"
                 />
 
-                {/* per-model results */}
                 {models.length > 0 && (
                   <div className="mt-3 grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.min(models.length, 3)}, minmax(0, 1fr))` }}>
                     {models.map((m) => {
@@ -334,6 +383,7 @@ export const EvalsConsole: React.FC = () => {
                               })()}
                               <div className="font-mono text-[10px] text-studio-faint">
                                 total {cell.result.totalTokens} tok · {cell.result.totalLatencyMs} ms
+                                {cell.result.totalCost != null ? ` · ${fmtUsd(cell.result.totalCost)}` : ''}
                               </div>
                             </div>
                           )}
@@ -351,7 +401,8 @@ export const EvalsConsole: React.FC = () => {
       {/* hidden inputs */}
       <input ref={bulkInput} type="file" accept="image/*" multiple hidden onChange={(e) => { addBulkImages(e.target.files); e.currentTarget.value = ''; }} />
       <input ref={itemImageInput} type="file" accept="image/*" multiple hidden onChange={(e) => { addImagesToTarget(e.target.files); e.currentTarget.value = ''; }} />
-      <input ref={itemVoiceInput} type="file" accept="audio/*" hidden onChange={(e) => { const f = e.target.files?.[0] || null; if (targetItem.current) updateItem(targetItem.current, { voice: f }); e.currentTarget.value = ''; }} />
+      <input ref={itemVoiceInput} type="file" accept="audio/*" hidden onChange={(e) => { setVoiceForTarget(e.target.files?.[0] || null); e.currentTarget.value = ''; }} />
+      <input ref={datasetInput} type="file" accept="application/json,.json" hidden onChange={(e) => { loadDataset(e.target.files?.[0] || null); e.currentTarget.value = ''; }} />
     </section>
   );
 };
