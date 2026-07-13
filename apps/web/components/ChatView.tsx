@@ -33,7 +33,7 @@ export const ChatView: React.FC = () => {
 
   const [turns, setTurns] = useState<Turn[]>([]);
   const [text, setText] = useState('');
-  const [image, setImage] = useState<File | null>(null);
+  const [images, setImages] = useState<File[]>([]);
   const [audio, setAudio] = useState<File | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState('');
@@ -59,7 +59,7 @@ export const ChatView: React.FC = () => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [turns, streamText]);
 
-  const canSend = !streaming && (!!text.trim() || !!image || !!audio);
+  const canSend = !streaming && (!!text.trim() || images.length > 0 || !!audio);
 
   const handleSend = async () => {
     if (!canSend) return;
@@ -68,30 +68,35 @@ export const ChatView: React.FC = () => {
     if (!apiKey) return setError('Add your OpenRouter key in the sidebar first.');
     if (!model.trim()) return setError('Pick a model in Run settings.');
 
-    const hasMedia = !!image || !!audio;
-    const imageDataUrl = image ? await fileToDataURL(image) : undefined;
+    const hasMedia = images.length > 0 || !!audio;
+    const imageDataUrls = await Promise.all(images.map(fileToDataURL));
     const audioPart = audio ? await fileToAudio(audio) : undefined;
 
-    const userTurn: Turn = { role: 'user', text: text.trim(), imageName: image?.name, audioName: audio?.name };
+    const userTurn: Turn = {
+      role: 'user',
+      text: text.trim(),
+      imageName: images.length ? `${images.length} image${images.length > 1 ? 's' : ''}` : undefined,
+      audioName: audio?.name,
+    };
     const history = [...turns, userTurn];
     setTurns(history);
 
     const promptText = text;
     setText('');
-    setImage(null);
+    setImages([]);
     setAudio(null);
     setStreaming(true);
     setStreamText('');
 
     if (hasMedia) {
-      // Staged pipeline: OCR/STT run as visible steps, each with its own metrics.
+      // Staged pipeline: OCR (per image) / STT run as visible steps with metrics.
       const result = await runPipeline({
         model,
         apiKey,
         temperature,
         webSearch,
         prompt: promptText,
-        imageDataUrl,
+        images: imageDataUrls,
         audio: audioPart,
       });
       setTurns([
@@ -238,14 +243,21 @@ export const ChatView: React.FC = () => {
         <div className="px-6 pb-6 pt-1">
           <div className="mx-auto max-w-3xl">
             {error && <div className="mb-2 text-center text-xs text-red-600">{error}</div>}
-            {(image || audio) && (
+            {(images.length > 0 || audio) && (
               <div className="mb-2 flex flex-wrap gap-2">
-                {image && <Chip label={image.name} icon={<ImageIcon className="h-3.5 w-3.5" />} onRemove={() => setImage(null)} />}
+                {images.map((img, i) => (
+                  <Chip
+                    key={i}
+                    label={img.name}
+                    icon={<ImageIcon className="h-3.5 w-3.5" />}
+                    onRemove={() => setImages(images.filter((_, idx) => idx !== i))}
+                  />
+                ))}
                 {audio && <Chip label={audio.name} icon={<Mic className="h-3.5 w-3.5" />} onRemove={() => setAudio(null)} />}
               </div>
             )}
             <div className="flex items-end gap-1 rounded-[26px] border border-studio-border bg-white p-2 shadow-sm transition-colors focus-within:border-studio-blue">
-              <button onClick={() => imageInput.current?.click()} title="Attach image" className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-studio-muted hover:bg-studio-hover">
+              <button onClick={() => imageInput.current?.click()} title="Attach images (multiple)" className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-studio-muted hover:bg-studio-hover">
                 <ImageIcon className="h-5 w-5" />
               </button>
               <button onClick={() => audioInput.current?.click()} title="Attach audio" className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-studio-muted hover:bg-studio-hover">
@@ -268,7 +280,17 @@ export const ChatView: React.FC = () => {
                 {streaming ? <Loader2 className="h-5 w-5 animate-spin" /> : <ArrowUp className="h-5 w-5" />}
               </button>
             </div>
-            <input ref={imageInput} type="file" accept="image/*" hidden onChange={(e) => setImage(e.target.files?.[0] || null)} />
+            <input
+              ref={imageInput}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => {
+                if (e.target.files) setImages((prev) => [...prev, ...Array.from(e.target.files!)]);
+                e.target.value = '';
+              }}
+            />
             <input ref={audioInput} type="file" accept="audio/*" hidden onChange={(e) => setAudio(e.target.files?.[0] || null)} />
           </div>
         </div>

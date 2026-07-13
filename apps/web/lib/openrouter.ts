@@ -147,13 +147,14 @@ export async function* chatStream(
 /** Build a user message with optional image (data URL) and audio (base64). */
 export function userMessage(
   text: string,
-  imageDataUrl?: string,
+  images?: string | string[],
   audio?: { data: string; format: string },
 ): ChatMessage {
-  if (!imageDataUrl && !audio) return { role: 'user', content: text };
+  const imgs = images ? (Array.isArray(images) ? images : [images]) : [];
+  if (!imgs.length && !audio) return { role: 'user', content: text };
   const parts: ContentPart[] = [];
   if (text) parts.push({ type: 'text', text });
-  if (imageDataUrl) parts.push({ type: 'image_url', image_url: { url: imageDataUrl } });
+  for (const url of imgs) parts.push({ type: 'image_url', image_url: { url } });
   if (audio) parts.push({ type: 'input_audio', input_audio: audio });
   return { role: 'user', content: parts };
 }
@@ -206,7 +207,7 @@ export interface PipelineInput {
   prompt: string;
   temperature?: number;
   webSearch?: boolean;
-  imageDataUrl?: string;
+  images?: string[];
   audio?: { data: string; format: string };
   signal?: AbortSignal;
 }
@@ -220,19 +221,26 @@ const STT_INSTRUCTION =
  *  prompt using the extracted text. Each step reports its own text + usage + ms. */
 export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
   const stages: Stage[] = [];
-  let ocrText = '';
+  const images = inp.images || [];
   let sttText = '';
 
-  if (inp.imageDataUrl) {
+  // OCR each image as its own visible step.
+  for (let i = 0; i < images.length; i++) {
     const r = await chat({
       model: inp.model,
       apiKey: inp.apiKey,
       temperature: 0,
       signal: inp.signal,
-      messages: [userMessage(OCR_INSTRUCTION, inp.imageDataUrl)],
+      messages: [userMessage(OCR_INSTRUCTION, images[i])],
     });
-    stages.push({ name: 'ocr', label: 'OCR — read', text: r.text, usage: r.usage, latencyMs: r.latencyMs, error: r.error });
-    ocrText = r.text;
+    stages.push({
+      name: 'ocr',
+      label: images.length > 1 ? `OCR — image ${i + 1}` : 'OCR — read',
+      text: r.text,
+      usage: r.usage,
+      latencyMs: r.latencyMs,
+      error: r.error,
+    });
   }
 
   if (inp.audio) {
@@ -247,9 +255,8 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
     sttText = r.text;
   }
 
-  let context = '';
-  if (ocrText) context += `\n\n[Text extracted from the image]\n${ocrText}`;
-  if (sttText) context += `\n\n[Audio transcript]\n${sttText}`;
+  // Answer sees the actual images (real multimodal response) + the transcript.
+  const context = sttText ? `\n\n[Audio transcript]\n${sttText}` : '';
   const answerPrompt = (inp.prompt?.trim() || 'Analyze the provided content.') + context;
 
   const r = await chat({
@@ -258,7 +265,7 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
     temperature: inp.temperature,
     webSearch: inp.webSearch,
     signal: inp.signal,
-    messages: [userMessage(answerPrompt)],
+    messages: [userMessage(answerPrompt, images)],
   });
   stages.push({ name: 'answer', label: 'Answer', text: r.text, usage: r.usage, latencyMs: r.latencyMs, error: r.error });
 

@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, Download, Loader2, Play, Plus, Square, X } from 'lucide-react';
+import { Check, Download, ImageIcon, Loader2, Mic, Play, Plus, Square, X } from 'lucide-react';
 import { ModelInput } from './ModelInput';
 import { StageBlock } from './StageBlock';
-import { fileToDataURL, PipelineResult, runPipeline } from '../lib/openrouter';
+import { fileToAudio, fileToDataURL, PipelineResult, runPipeline } from '../lib/openrouter';
 import { getOpenRouterKey, getStored, setStored } from '../lib/settings';
 
-type EvalInput = { id: string; file: File; dataUrl: string; prompt: string };
+type EvalImage = { file: File; dataUrl: string };
+type EvalInput = { id: string; images: EvalImage[]; voice: File | null; prompt: string };
 type Cell = { status: 'idle' | 'running' | 'done' | 'error'; result?: PipelineResult };
 type Results = Record<string, Record<string, Cell>>;
 
@@ -24,7 +25,10 @@ export const EvalsConsole: React.FC = () => {
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const stopRef = useRef(false);
-  const fileInput = useRef<HTMLInputElement>(null);
+  const bulkInput = useRef<HTMLInputElement>(null);
+  const itemImageInput = useRef<HTMLInputElement>(null);
+  const itemVoiceInput = useRef<HTMLInputElement>(null);
+  const targetItem = useRef<string>('');
 
   useEffect(() => {
     setModels(getStored('or.eval.models', []));
@@ -35,13 +39,27 @@ export const EvalsConsole: React.FC = () => {
   useEffect(() => setStored('or.eval.temp', temperature), [temperature]);
   useEffect(() => setStored('or.eval.web', webSearch), [webSearch]);
 
-  const addImages = async (files: FileList | null) => {
+  const updateItem = (id: string, patch: Partial<EvalInput>) =>
+    setInputs((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+
+  const addBlankInput = () =>
+    setInputs((prev) => [...prev, { id: `in-${++idSeq}`, images: [], voice: null, prompt: '' }]);
+
+  const addBulkImages = async (files: FileList | null) => {
     if (!files) return;
-    const added: EvalInput[] = [];
+    const items: EvalInput[] = [];
     for (const file of Array.from(files)) {
-      added.push({ id: `in-${++idSeq}`, file, dataUrl: await fileToDataURL(file), prompt: '' });
+      items.push({ id: `in-${++idSeq}`, images: [{ file, dataUrl: await fileToDataURL(file) }], voice: null, prompt: '' });
     }
-    setInputs((prev) => [...prev, ...added]);
+    setInputs((prev) => [...prev, ...items]);
+  };
+
+  const addImagesToTarget = async (files: FileList | null) => {
+    const id = targetItem.current;
+    if (!files || !id) return;
+    const imgs: EvalImage[] = [];
+    for (const file of Array.from(files)) imgs.push({ file, dataUrl: await fileToDataURL(file) });
+    setInputs((prev) => prev.map((it) => (it.id === id ? { ...it, images: [...it.images, ...imgs] } : it)));
   };
 
   const addModel = () => {
@@ -58,7 +76,7 @@ export const EvalsConsole: React.FC = () => {
     const apiKey = getOpenRouterKey();
     if (!apiKey) return setError('Add your OpenRouter key in the sidebar first.');
     if (!models.length) return setError('Add at least one model to compare.');
-    if (!inputs.length) return setError('Add at least one image.');
+    if (!inputs.length) return setError('Add at least one input.');
 
     stopRef.current = false;
     setRunning(true);
@@ -67,18 +85,13 @@ export const EvalsConsole: React.FC = () => {
     let done = 0;
 
     outer: for (const input of inputs) {
+      const audioPart = input.voice ? await fileToAudio(input.voice) : undefined;
+      const imageUrls = input.images.map((i) => i.dataUrl);
       for (const model of models) {
         if (stopRef.current) break outer;
         setCell(input.id, model, { status: 'running' });
         setProgress(`${done + 1} / ${total}`);
-        const result = await runPipeline({
-          model,
-          apiKey,
-          temperature,
-          webSearch,
-          prompt: input.prompt,
-          imageDataUrl: input.dataUrl,
-        });
+        const result = await runPipeline({ model, apiKey, temperature, webSearch, prompt: input.prompt, images: imageUrls, audio: audioPart });
         setCell(input.id, model, { status: result.error ? 'error' : 'done', result });
         done++;
       }
@@ -89,7 +102,8 @@ export const EvalsConsole: React.FC = () => {
 
   const exportJson = () => {
     const payload = inputs.map((inp) => ({
-      image: inp.file.name,
+      images: inp.images.map((i) => i.file.name),
+      voice: inp.voice?.name || null,
       prompt: inp.prompt,
       results: models.map((m) => {
         const cell = results[inp.id]?.[m];
@@ -117,25 +131,15 @@ export const EvalsConsole: React.FC = () => {
         <div className="font-display text-[15px] font-medium">Evals</div>
         <div className="flex items-center gap-2">
           {progress && <span className="text-xs text-studio-muted">{progress}</span>}
-          <button
-            onClick={exportJson}
-            disabled={!inputs.length}
-            className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover disabled:opacity-40"
-          >
+          <button onClick={exportJson} disabled={!inputs.length} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover disabled:opacity-40">
             <Download className="h-3.5 w-3.5" /> Export
           </button>
           {running ? (
-            <button
-              onClick={() => (stopRef.current = true)}
-              className="flex items-center gap-1.5 rounded-full bg-red-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-red-700"
-            >
+            <button onClick={() => (stopRef.current = true)} className="flex items-center gap-1.5 rounded-full bg-red-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-red-700">
               <Square className="h-3.5 w-3.5" /> Stop
             </button>
           ) : (
-            <button
-              onClick={runAll}
-              className="flex items-center gap-1.5 rounded-full bg-studio-blue px-4 py-1.5 text-xs font-medium text-white hover:bg-studio-bluehover"
-            >
+            <button onClick={runAll} className="flex items-center gap-1.5 rounded-full bg-studio-blue px-4 py-1.5 text-xs font-medium text-white hover:bg-studio-bluehover">
               <Play className="h-3.5 w-3.5" /> Run all
             </button>
           )}
@@ -145,7 +149,7 @@ export const EvalsConsole: React.FC = () => {
       <div className="flex-1 overflow-auto px-6 py-6">
         {error && <div className="mb-3 text-sm text-red-600">{error}</div>}
 
-        {/* config: models + temperature + web search */}
+        {/* config */}
         <div className="mb-6 rounded-xl border border-studio-border bg-studio-surface p-4">
           <label className="mb-1.5 block text-xs font-medium text-studio-muted">Models to compare</label>
           <div className="flex flex-wrap items-center gap-2">
@@ -169,15 +173,7 @@ export const EvalsConsole: React.FC = () => {
           <div className="mt-3 flex items-center gap-6">
             <label className="flex items-center gap-2 text-xs text-studio-muted">
               Temperature
-              <input
-                type="number"
-                min={0}
-                max={2}
-                step={0.1}
-                value={temperature}
-                onChange={(e) => setTemperature(Math.min(2, Math.max(0, Number(e.target.value))))}
-                className="w-14 rounded-md border border-studio-border bg-white px-2 py-1 text-right text-sm text-studio-text focus:border-studio-blue focus:outline-none"
-              />
+              <input type="number" min={0} max={2} step={0.1} value={temperature} onChange={(e) => setTemperature(Math.min(2, Math.max(0, Number(e.target.value))))} className="w-14 rounded-md border border-studio-border bg-white px-2 py-1 text-right text-sm text-studio-text focus:border-studio-blue focus:outline-none" />
             </label>
             <label className="flex cursor-pointer items-center gap-2 text-xs text-studio-muted">
               <input type="checkbox" checked={webSearch} onChange={(e) => setWebSearch(e.target.checked)} className="h-3.5 w-3.5 accent-studio-blue" />
@@ -186,49 +182,84 @@ export const EvalsConsole: React.FC = () => {
           </div>
         </div>
 
-        {/* inputs */}
+        {/* inputs toolbar */}
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-xs font-medium text-studio-muted">Inputs ({inputs.length})</h3>
-          <button
-            onClick={() => fileInput.current?.click()}
-            className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover"
-          >
-            <Plus className="h-3.5 w-3.5" /> Add images
-          </button>
-          <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={(e) => addImages(e.target.files)} />
+          <h3 className="text-xs font-medium text-studio-muted">Dataset — inputs ({inputs.length})</h3>
+          <div className="flex gap-2">
+            <button onClick={addBlankInput} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
+              <Plus className="h-3.5 w-3.5" /> Add input
+            </button>
+            <button onClick={() => bulkInput.current?.click()} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
+              <ImageIcon className="h-3.5 w-3.5" /> Bulk images
+            </button>
+          </div>
         </div>
 
         {inputs.length === 0 ? (
           <div className="rounded-xl border border-dashed border-studio-border py-12 text-center text-sm text-studio-faint">
-            Add images, give each its own prompt, pick models to compare, then Run all.
+            Each input can be image(s), text, voice, or all. Add inputs, pick models, then Run all.
           </div>
         ) : (
           <div className="space-y-4">
-            {inputs.map((inp) => (
+            {inputs.map((inp, idx) => (
               <div key={inp.id} className="rounded-xl border border-studio-border bg-white p-3">
-                <div className="flex gap-3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={inp.dataUrl} alt={inp.file.name} className="h-20 w-20 shrink-0 rounded-lg object-cover" />
-                  <div className="min-w-0 flex-1">
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="truncate text-xs text-studio-muted">{inp.file.name}</span>
-                      <button onClick={() => setInputs(inputs.filter((x) => x.id !== inp.id))} className="text-studio-muted hover:text-studio-text">
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <textarea
-                      value={inp.prompt}
-                      onChange={(e) =>
-                        setInputs(inputs.map((x) => (x.id === inp.id ? { ...x, prompt: e.target.value } : x)))
-                      }
-                      rows={2}
-                      placeholder="Prompt for this image (e.g. Extract all text)"
-                      className="w-full resize-none rounded-lg border border-studio-border bg-white px-3 py-2 text-sm text-studio-text placeholder-studio-faint focus:border-studio-blue focus:outline-none"
-                    />
-                  </div>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-medium text-studio-muted">Input {idx + 1}</span>
+                  <button onClick={() => setInputs(inputs.filter((x) => x.id !== inp.id))} className="text-studio-muted hover:text-studio-text">
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
 
-                {/* per-model results for this input */}
+                {/* images */}
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  {inp.images.map((im, i) => (
+                    <div key={i} className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={im.dataUrl} alt={im.file.name} className="h-16 w-16 rounded-lg object-cover" />
+                      <button
+                        onClick={() => updateItem(inp.id, { images: inp.images.filter((_, x) => x !== i) })}
+                        className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-white text-studio-muted shadow ring-1 ring-studio-border hover:text-studio-text"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => { targetItem.current = inp.id; itemImageInput.current?.click(); }}
+                    className="grid h-16 w-16 place-items-center rounded-lg border border-dashed border-studio-border text-studio-muted hover:bg-studio-hover"
+                    title="Add image(s)"
+                  >
+                    <ImageIcon className="h-5 w-5" />
+                  </button>
+                </div>
+
+                {/* voice + prompt */}
+                <div className="mb-2 flex items-center gap-2">
+                  {inp.voice ? (
+                    <span className="flex items-center gap-1.5 rounded-full border border-studio-border bg-studio-surface px-3 py-1 text-xs">
+                      <Mic className="h-3.5 w-3.5" /> {inp.voice.name}
+                      <button onClick={() => updateItem(inp.id, { voice: null })} className="text-studio-muted hover:text-studio-text">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => { targetItem.current = inp.id; itemVoiceInput.current?.click(); }}
+                      className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover"
+                    >
+                      <Mic className="h-3.5 w-3.5" /> Add voice
+                    </button>
+                  )}
+                </div>
+                <textarea
+                  value={inp.prompt}
+                  onChange={(e) => updateItem(inp.id, { prompt: e.target.value })}
+                  rows={2}
+                  placeholder="Prompt / text for this input (e.g. Extract all text, or a question)"
+                  className="w-full resize-none rounded-lg border border-studio-border bg-white px-3 py-2 text-sm text-studio-text placeholder-studio-faint focus:border-studio-blue focus:outline-none"
+                />
+
+                {/* per-model results */}
                 {models.length > 0 && (
                   <div className="mt-3 grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.min(models.length, 3)}, minmax(0, 1fr))` }}>
                     {models.map((m) => {
@@ -261,6 +292,11 @@ export const EvalsConsole: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* hidden inputs */}
+      <input ref={bulkInput} type="file" accept="image/*" multiple hidden onChange={(e) => { addBulkImages(e.target.files); e.currentTarget.value = ''; }} />
+      <input ref={itemImageInput} type="file" accept="image/*" multiple hidden onChange={(e) => { addImagesToTarget(e.target.files); e.currentTarget.value = ''; }} />
+      <input ref={itemVoiceInput} type="file" accept="audio/*" hidden onChange={(e) => { const f = e.target.files?.[0] || null; if (targetItem.current) updateItem(targetItem.current, { voice: f }); e.currentTarget.value = ''; }} />
     </section>
   );
 };
