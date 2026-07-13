@@ -14,6 +14,8 @@ type Results = Record<string, Record<string, Cell>>;
 
 let idSeq = 0;
 
+const CALL_TIMEOUT_MS = 90_000;
+
 export const EvalsConsole: React.FC = () => {
   const [models, setModels] = useState<string[]>([]);
   const [modelDraft, setModelDraft] = useState('');
@@ -25,6 +27,7 @@ export const EvalsConsole: React.FC = () => {
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const stopRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
   const bulkInput = useRef<HTMLInputElement>(null);
   const itemImageInput = useRef<HTMLInputElement>(null);
   const itemVoiceInput = useRef<HTMLInputElement>(null);
@@ -79,6 +82,8 @@ export const EvalsConsole: React.FC = () => {
     if (!inputs.length) return setError('Add at least one input.');
 
     stopRef.current = false;
+    const controller = new AbortController();
+    abortRef.current = controller;
     setRunning(true);
     setResults({});
     const total = inputs.length * models.length;
@@ -91,13 +96,23 @@ export const EvalsConsole: React.FC = () => {
         if (stopRef.current) break outer;
         setCell(input.id, model, { status: 'running' });
         setProgress(`${done + 1} / ${total}`);
-        const result = await runPipeline({ model, apiKey, temperature, webSearch, prompt: input.prompt, images: imageUrls, audio: audioPart });
+        const result = await runPipeline({ model, apiKey, temperature, webSearch, prompt: input.prompt, images: imageUrls, audio: audioPart, signal: controller.signal, timeoutMs: CALL_TIMEOUT_MS });
         setCell(input.id, model, { status: result.error ? 'error' : 'done', result });
         done++;
       }
     }
     setRunning(false);
     setProgress('');
+  };
+
+  const download = (name: string, content: string, type: string) => {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const exportJson = () => {
@@ -116,13 +131,40 @@ export const EvalsConsole: React.FC = () => {
         };
       }),
     }));
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'evals.json';
-    a.click();
-    URL.revokeObjectURL(url);
+    download('evals.json', JSON.stringify(payload, null, 2), 'application/json');
+  };
+
+  const exportCsv = () => {
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = ['input', 'images', 'voice', 'prompt', 'model', 'status', 'ocr_read', 'stt_transcript', 'answer', 'total_tokens', 'total_ms'];
+    const rows = [header.map(esc).join(',')];
+    inputs.forEach((inp, i) => {
+      models.forEach((m) => {
+        const cell = results[inp.id]?.[m];
+        const stages = cell?.result?.stages || [];
+        const ocr = stages.filter((s) => s.name === 'ocr').map((s) => s.text).join('\n---\n');
+        const stt = stages.filter((s) => s.name === 'stt').map((s) => s.text).join('\n');
+        const answer = stages.find((s) => s.name === 'answer')?.text || '';
+        rows.push(
+          [
+            i + 1,
+            inp.images.map((x) => x.file.name).join('; '),
+            inp.voice?.name || '',
+            inp.prompt,
+            m,
+            cell?.status || '',
+            ocr,
+            stt,
+            answer,
+            cell?.result?.totalTokens ?? '',
+            cell?.result?.totalLatencyMs ?? '',
+          ]
+            .map(esc)
+            .join(','),
+        );
+      });
+    });
+    download('evals.csv', rows.join('\n'), 'text/csv;charset=utf-8');
   };
 
   return (
@@ -131,11 +173,14 @@ export const EvalsConsole: React.FC = () => {
         <div className="font-display text-[15px] font-medium">Evals</div>
         <div className="flex items-center gap-2">
           {progress && <span className="text-xs text-studio-muted">{progress}</span>}
+          <button onClick={exportCsv} disabled={!inputs.length} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover disabled:opacity-40">
+            <Download className="h-3.5 w-3.5" /> CSV
+          </button>
           <button onClick={exportJson} disabled={!inputs.length} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover disabled:opacity-40">
-            <Download className="h-3.5 w-3.5" /> Export
+            <Download className="h-3.5 w-3.5" /> JSON
           </button>
           {running ? (
-            <button onClick={() => (stopRef.current = true)} className="flex items-center gap-1.5 rounded-full bg-red-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-red-700">
+            <button onClick={() => { stopRef.current = true; abortRef.current?.abort(); }} className="flex items-center gap-1.5 rounded-full bg-red-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-red-700">
               <Square className="h-3.5 w-3.5" /> Stop
             </button>
           ) : (

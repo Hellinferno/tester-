@@ -27,6 +27,37 @@ export interface ChatOptions {
   temperature?: number;
   webSearch?: boolean;
   signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+/** Combine an optional external abort signal with an optional timeout, and hand
+ *  back a cleanup so the timer/listener don't leak once the call finishes. */
+function makeSignal(
+  external?: AbortSignal,
+  timeoutMs?: number,
+): { signal: AbortSignal | undefined; done: () => void } {
+  if (!external && !timeoutMs) return { signal: undefined, done: () => {} };
+  const ctrl = new AbortController();
+  const cleanups: Array<() => void> = [];
+  if (external) {
+    if (external.aborted) ctrl.abort((external as any).reason);
+    else {
+      const h = () => ctrl.abort((external as any).reason);
+      external.addEventListener('abort', h, { once: true });
+      cleanups.push(() => external.removeEventListener('abort', h));
+    }
+  }
+  if (timeoutMs) {
+    const t = setTimeout(() => ctrl.abort(new DOMException('Request timed out', 'TimeoutError')), timeoutMs);
+    cleanups.push(() => clearTimeout(t));
+  }
+  return { signal: ctrl.signal, done: () => cleanups.forEach((c) => c()) };
+}
+
+function abortMessage(e: any): string | null {
+  if (e?.name === 'TimeoutError') return 'Timed out';
+  if (e?.name === 'AbortError') return 'Aborted';
+  return null;
 }
 
 function headers(apiKey: string): Record<string, string> {
@@ -60,13 +91,14 @@ export interface ChatResult {
 /** Non-streaming completion. Returns text + usage + latency; never throws. */
 export async function chat(opts: ChatOptions): Promise<ChatResult> {
   const start = Date.now();
+  if (!opts.apiKey) return { text: '', latencyMs: 0, error: 'No OpenRouter key set' };
+  const { signal, done } = makeSignal(opts.signal, opts.timeoutMs);
   try {
-    if (!opts.apiKey) return { text: '', latencyMs: 0, error: 'No OpenRouter key set' };
     const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
       method: 'POST',
       headers: headers(opts.apiKey),
       body: JSON.stringify(requestBody(opts, false)),
-      signal: opts.signal,
+      signal,
     });
     const latencyMs = Date.now() - start;
     if (!res.ok) {
@@ -76,7 +108,9 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
     const json = await res.json();
     return { text: json.choices?.[0]?.message?.content ?? '', usage: json.usage, latencyMs };
   } catch (e: any) {
-    return { text: '', latencyMs: Date.now() - start, error: e?.name === 'AbortError' ? 'Aborted' : String(e) };
+    return { text: '', latencyMs: Date.now() - start, error: abortMessage(e) || String(e) };
+  } finally {
+    done();
   }
 }
 
@@ -101,23 +135,24 @@ export async function* chatStream(
       onDone?.({ usage, latencyMs: Date.now() - start });
     }
   };
-  const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: headers(opts.apiKey),
-    body: JSON.stringify(requestBody(opts, true)),
-    signal: opts.signal,
-  });
-  if (!res.ok || !res.body) {
-    const detail = await res.text().catch(() => '');
-    throw new Error(`HTTP ${res.status}: ${detail.slice(0, 300)}`);
-  }
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+  const { signal, done } = makeSignal(opts.signal, opts.timeoutMs);
   try {
+    const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: headers(opts.apiKey),
+      body: JSON.stringify(requestBody(opts, true)),
+      signal,
+    });
+    if (!res.ok || !res.body) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status}: ${detail.slice(0, 300)}`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      const { done: rdone, value } = await reader.read();
+      if (rdone) break;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
@@ -125,10 +160,7 @@ export async function* chatStream(
         const t = line.trim();
         if (!t.startsWith('data:')) continue;
         const data = t.slice(5).trim();
-        if (data === '[DONE]') {
-          finish();
-          return;
-        }
+        if (data === '[DONE]') return;
         try {
           const obj = JSON.parse(data);
           if (obj.usage) usage = obj.usage;
@@ -141,6 +173,7 @@ export async function* chatStream(
     }
   } finally {
     finish();
+    done();
   }
 }
 
@@ -210,6 +243,7 @@ export interface PipelineInput {
   images?: string[];
   audio?: { data: string; format: string };
   signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 const OCR_INSTRUCTION =
@@ -231,6 +265,7 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
       apiKey: inp.apiKey,
       temperature: 0,
       signal: inp.signal,
+      timeoutMs: inp.timeoutMs,
       messages: [userMessage(OCR_INSTRUCTION, images[i])],
     });
     stages.push({
@@ -249,6 +284,7 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
       apiKey: inp.apiKey,
       temperature: 0,
       signal: inp.signal,
+      timeoutMs: inp.timeoutMs,
       messages: [userMessage(STT_INSTRUCTION, undefined, inp.audio)],
     });
     stages.push({ name: 'stt', label: 'STT — transcript', text: r.text, usage: r.usage, latencyMs: r.latencyMs, error: r.error });
@@ -265,6 +301,7 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
     temperature: inp.temperature,
     webSearch: inp.webSearch,
     signal: inp.signal,
+    timeoutMs: inp.timeoutMs,
     messages: [userMessage(answerPrompt, images)],
   });
   stages.push({ name: 'answer', label: 'Answer', text: r.text, usage: r.usage, latencyMs: r.latencyMs, error: r.error });

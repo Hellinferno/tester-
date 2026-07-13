@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUp, ImageIcon, Loader2, Mic, Sparkles, Trash2, X } from 'lucide-react';
+import { ArrowUp, ImageIcon, Loader2, Mic, Sparkles, Square, Trash2, X } from 'lucide-react';
 import { RunSettings } from './RunSettings';
 import { StageBlock } from './StageBlock';
 import {
@@ -19,11 +19,13 @@ import { getOpenRouterKey, getStored, setStored } from '../lib/settings';
 type Turn = {
   role: 'user' | 'assistant';
   text: string;
-  imageName?: string;
+  imageThumbs?: string[];
   audioName?: string;
   stages?: Stage[];
   metrics?: { tokens?: number; latencyMs?: number };
 };
+
+const CALL_TIMEOUT_MS = 90_000;
 
 export const ChatView: React.FC = () => {
   const [model, setModel] = useState('');
@@ -42,6 +44,7 @@ export const ChatView: React.FC = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const audioInput = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // restore + persist settings
   useEffect(() => {
@@ -75,7 +78,7 @@ export const ChatView: React.FC = () => {
     const userTurn: Turn = {
       role: 'user',
       text: text.trim(),
-      imageName: images.length ? `${images.length} image${images.length > 1 ? 's' : ''}` : undefined,
+      imageThumbs: imageDataUrls.length ? imageDataUrls : undefined,
       audioName: audio?.name,
     };
     const history = [...turns, userTurn];
@@ -88,6 +91,9 @@ export const ChatView: React.FC = () => {
     setStreaming(true);
     setStreamText('');
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     if (hasMedia) {
       // Staged pipeline: OCR (per image) / STT run as visible steps with metrics.
       const result = await runPipeline({
@@ -98,6 +104,8 @@ export const ChatView: React.FC = () => {
         prompt: promptText,
         images: imageDataUrls,
         audio: audioPart,
+        signal: controller.signal,
+        timeoutMs: CALL_TIMEOUT_MS,
       });
       setTurns([
         ...history,
@@ -121,9 +129,12 @@ export const ChatView: React.FC = () => {
     let acc = '';
     let meta: StreamMeta | undefined;
     try {
-      for await (const delta of chatStream({ model, messages, apiKey, temperature, webSearch }, (m) => {
-        meta = m;
-      })) {
+      for await (const delta of chatStream(
+        { model, messages, apiKey, temperature, webSearch, signal: controller.signal, timeoutMs: CALL_TIMEOUT_MS },
+        (m) => {
+          meta = m;
+        },
+      )) {
         acc += delta;
         setStreamText(acc);
       }
@@ -184,12 +195,15 @@ export const ChatView: React.FC = () => {
                       <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-tr-sm bg-studio-bluesoft px-4 py-2.5 text-sm">
                         {t.text || <span className="text-studio-muted">(no text)</span>}
                       </div>
-                      {(t.imageName || t.audioName) && (
-                        <div className="flex gap-2 text-xs text-studio-muted">
-                          {t.imageName && <span>🖼 {t.imageName}</span>}
-                          {t.audioName && <span>🎙 {t.audioName}</span>}
+                      {t.imageThumbs && t.imageThumbs.length > 0 && (
+                        <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5">
+                          {t.imageThumbs.map((src, k) => (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img key={k} src={src} alt="" className="h-16 w-16 rounded-lg object-cover ring-1 ring-studio-border" />
+                          ))}
                         </div>
                       )}
+                      {t.audioName && <div className="text-xs text-studio-muted">🎙 {t.audioName}</div>}
                     </div>
                   ) : (
                     <div key={i} className="flex gap-3">
@@ -271,14 +285,24 @@ export const ChatView: React.FC = () => {
                 placeholder="Enter a prompt here"
                 className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2.5 text-[15px] placeholder-studio-faint focus:outline-none"
               />
-              <button
-                onClick={handleSend}
-                disabled={!canSend}
-                title="Send (Ctrl+Enter)"
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-studio-blue text-white transition-colors hover:bg-studio-bluehover disabled:bg-[#c4c7c5]"
-              >
-                {streaming ? <Loader2 className="h-5 w-5 animate-spin" /> : <ArrowUp className="h-5 w-5" />}
-              </button>
+              {streaming ? (
+                <button
+                  onClick={() => abortRef.current?.abort()}
+                  title="Stop"
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-red-600 text-white transition-colors hover:bg-red-700"
+                >
+                  <Square className="h-4 w-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!canSend}
+                  title="Send (Ctrl+Enter)"
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-studio-blue text-white transition-colors hover:bg-studio-bluehover disabled:bg-[#c4c7c5]"
+                >
+                  <ArrowUp className="h-5 w-5" />
+                </button>
+              )}
             </div>
             <input
               ref={imageInput}
