@@ -35,6 +35,7 @@ export const ChatView: React.FC = () => {
   const [model, setModel] = useState('');
   const [temperature, setTemperature] = useState(0.7);
   const [timeoutSec, setTimeoutSec] = useState(90);
+  const [maxTokens, setMaxTokens] = useState(0);
   const [webSearch, setWebSearch] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
 
@@ -57,6 +58,7 @@ export const ChatView: React.FC = () => {
     setModel(getStored('or.chat.model', ''));
     setTemperature(getStored('or.chat.temp', 0.7));
     setTimeoutSec(getStored('or.chat.timeout', 90));
+    setMaxTokens(getStored('or.chat.maxtok', 0));
     setWebSearch(getStored('or.chat.web', false));
     setSystemPrompt(getStored('or.chat.system', ''));
     fetchModelsCached().then(setModelList);
@@ -64,6 +66,7 @@ export const ChatView: React.FC = () => {
   useEffect(() => setStored('or.chat.model', model), [model]);
   useEffect(() => setStored('or.chat.temp', temperature), [temperature]);
   useEffect(() => setStored('or.chat.timeout', timeoutSec), [timeoutSec]);
+  useEffect(() => setStored('or.chat.maxtok', maxTokens), [maxTokens]);
   useEffect(() => setStored('or.chat.web', webSearch), [webSearch]);
   useEffect(() => setStored('or.chat.system', systemPrompt), [systemPrompt]);
 
@@ -116,6 +119,7 @@ export const ChatView: React.FC = () => {
         images: imageDataUrls,
         audio: audioPart,
         pricing,
+        maxTokens,
         signal: controller.signal,
         timeoutMs,
       });
@@ -142,7 +146,7 @@ export const ChatView: React.FC = () => {
     let meta: StreamMeta | undefined;
     try {
       for await (const delta of chatStream(
-        { model, messages, apiKey, temperature, webSearch, signal: controller.signal, timeoutMs },
+        { model, messages, apiKey, temperature, webSearch, maxTokens, signal: controller.signal, timeoutMs },
         (m) => {
           meta = m;
         },
@@ -349,6 +353,8 @@ export const ChatView: React.FC = () => {
         setTemperature={setTemperature}
         timeoutSec={timeoutSec}
         setTimeoutSec={setTimeoutSec}
+        maxTokens={maxTokens}
+        setMaxTokens={setMaxTokens}
         webSearch={webSearch}
         setWebSearch={setWebSearch}
         systemPrompt={systemPrompt}
@@ -356,6 +362,7 @@ export const ChatView: React.FC = () => {
         onReset={() => {
           setTemperature(0.7);
           setTimeoutSec(90);
+          setMaxTokens(0);
           setWebSearch(false);
           setSystemPrompt('');
         }}

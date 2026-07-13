@@ -11,6 +11,8 @@ interface RunSettingsProps {
   setTemperature: (v: number) => void;
   timeoutSec: number;
   setTimeoutSec: (v: number) => void;
+  maxTokens: number;
+  setMaxTokens: (v: number) => void;
   webSearch: boolean;
   setWebSearch: (v: boolean) => void;
   systemPrompt: string;
@@ -39,6 +41,8 @@ export const RunSettings: React.FC<RunSettingsProps> = ({
   setTemperature,
   timeoutSec,
   setTimeoutSec,
+  maxTokens,
+  setMaxTokens,
   webSearch,
   setWebSearch,
   systemPrompt,
@@ -102,6 +106,21 @@ export const RunSettings: React.FC<RunSettingsProps> = ({
             />
           </div>
           <p className="mt-1 text-xs text-studio-faint">Per call. 0 = no limit.</p>
+        </section>
+
+        <section>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-studio-muted">Max tokens</label>
+            <input
+              type="number"
+              min={0}
+              step={256}
+              value={maxTokens}
+              onChange={(e) => setMaxTokens(Math.max(0, Number(e.target.value)))}
+              className="w-20 rounded-md border border-studio-border bg-white px-2 py-1 text-right text-sm text-studio-text focus:border-studio-blue focus:outline-none"
+            />
+          </div>
+          <p className="mt-1 text-xs text-studio-faint">Caps output. 0 = model default. Lower it if you hit a credits limit.</p>
         </section>
 
         <section>

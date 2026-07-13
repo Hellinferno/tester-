@@ -26,6 +26,7 @@ export interface ChatOptions {
   apiKey: string;
   temperature?: number;
   webSearch?: boolean;
+  maxTokens?: number;
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -88,6 +89,7 @@ function requestBody(opts: ChatOptions, stream: boolean) {
     stream,
   };
   if (opts.webSearch) body.plugins = [{ id: 'web' }];
+  if (opts.maxTokens && opts.maxTokens > 0) body.max_tokens = opts.maxTokens;
   if (stream) body.stream_options = { include_usage: true };
   return body;
 }
@@ -256,6 +258,7 @@ export interface PipelineInput {
   webSearch?: boolean;
   images?: string[];
   audio?: { data: string; format: string };
+  maxTokens?: number;
   signal?: AbortSignal;
   timeoutMs?: number;
   pricing?: { prompt: number; completion: number };
@@ -281,6 +284,7 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
       temperature: 0,
       signal: inp.signal,
       timeoutMs: inp.timeoutMs,
+      maxTokens: inp.maxTokens,
       messages: [userMessage(OCR_INSTRUCTION, images[i])],
     });
     stages.push({
@@ -300,6 +304,7 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
       temperature: 0,
       signal: inp.signal,
       timeoutMs: inp.timeoutMs,
+      maxTokens: inp.maxTokens,
       messages: [userMessage(STT_INSTRUCTION, undefined, inp.audio)],
     });
     stages.push({ name: 'stt', label: 'STT — transcript', text: r.text, usage: r.usage, latencyMs: r.latencyMs, error: r.error });
@@ -317,6 +322,7 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
     webSearch: inp.webSearch,
     signal: inp.signal,
     timeoutMs: inp.timeoutMs,
+    maxTokens: inp.maxTokens,
     messages: [userMessage(answerPrompt, images)],
   });
   stages.push({ name: 'answer', label: 'Answer', text: r.text, usage: r.usage, latencyMs: r.latencyMs, error: r.error });

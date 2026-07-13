@@ -22,6 +22,7 @@ export const EvalsConsole: React.FC = () => {
   const [modelDraft, setModelDraft] = useState('');
   const [temperature, setTemperature] = useState(0.2);
   const [timeoutSec, setTimeoutSec] = useState(90);
+  const [maxTokens, setMaxTokens] = useState(0);
   const [webSearch, setWebSearch] = useState(false);
   const [inputs, setInputs] = useState<EvalInput[]>([]);
   const [results, setResults] = useState<Results>({});
@@ -42,12 +43,14 @@ export const EvalsConsole: React.FC = () => {
     setModels(getStored('or.eval.models', []));
     setTemperature(getStored('or.eval.temp', 0.2));
     setTimeoutSec(getStored('or.eval.timeout', 90));
+    setMaxTokens(getStored('or.eval.maxtok', 0));
     setWebSearch(getStored('or.eval.web', false));
     fetchModelsCached().then(setModelList);
   }, []);
   useEffect(() => setStored('or.eval.models', models), [models]);
   useEffect(() => setStored('or.eval.temp', temperature), [temperature]);
   useEffect(() => setStored('or.eval.timeout', timeoutSec), [timeoutSec]);
+  useEffect(() => setStored('or.eval.maxtok', maxTokens), [maxTokens]);
   useEffect(() => setStored('or.eval.web', webSearch), [webSearch]);
 
   const updateItem = (id: string, patch: Partial<EvalInput>) =>
@@ -124,6 +127,7 @@ export const EvalsConsole: React.FC = () => {
           images: imageUrls,
           audio: audioPart,
           pricing: pricingFor(modelList, model),
+          maxTokens,
           signal: controller.signal,
           timeoutMs,
         });
@@ -285,6 +289,10 @@ export const EvalsConsole: React.FC = () => {
             <label className="flex items-center gap-2 text-xs text-studio-muted">
               Timeout (s)
               <input type="number" min={0} step={5} value={timeoutSec} onChange={(e) => setTimeoutSec(Math.max(0, Number(e.target.value)))} className="w-16 rounded-md border border-studio-border bg-white px-2 py-1 text-right text-sm text-studio-text focus:border-studio-blue focus:outline-none" />
+            </label>
+            <label className="flex items-center gap-2 text-xs text-studio-muted" title="Caps output tokens. 0 = model default. Lower it if you hit a credits limit.">
+              Max tokens
+              <input type="number" min={0} step={256} value={maxTokens} onChange={(e) => setMaxTokens(Math.max(0, Number(e.target.value)))} className="w-20 rounded-md border border-studio-border bg-white px-2 py-1 text-right text-sm text-studio-text focus:border-studio-blue focus:outline-none" />
             </label>
             <label className="flex cursor-pointer items-center gap-2 text-xs text-studio-muted">
               <input type="checkbox" checked={webSearch} onChange={(e) => setWebSearch(e.target.checked)} className="h-3.5 w-3.5 accent-studio-blue" />
