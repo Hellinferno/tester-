@@ -41,8 +41,8 @@ function headers(apiKey: string): Record<string, string> {
   return {
     Authorization: `Bearer ${apiKey}`,
     'Content-Type': 'application/json',
-    'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'https://slm-router.studio',
-    'X-Title': 'SLM Router Studio',
+    'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'https://testing-ground.app',
+    'X-Title': 'Testing Ground',
   };
 }
 

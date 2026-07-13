@@ -2,9 +2,9 @@ import './globals.css';
 import React from 'react';
 
 export const metadata = {
-  title: 'SLM Router Studio',
+  title: 'Testing Ground',
   description:
-    'Multi-modal SLM query router — pick a model, ground with web search, and route to the best model.',
+    'Multi-modal chat and model evals — bring your own OpenRouter or Gemini key.',
 };
 
 export default function RootLayout({

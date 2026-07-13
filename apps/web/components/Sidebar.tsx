@@ -22,7 +22,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           <Sparkles className="h-5 w-5" />
         </div>
         <div className="leading-tight">
-          <div className="font-display text-[16px] font-medium text-studio-text">SLM Router</div>
+          <div className="font-display text-[16px] font-medium text-studio-text">Testing Ground</div>
           <div className="text-xs text-studio-muted">Studio</div>
         </div>
       </div>
