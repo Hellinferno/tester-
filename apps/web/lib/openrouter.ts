@@ -46,6 +46,7 @@ function requestBody(opts: ChatOptions, stream: boolean) {
     stream,
   };
   if (opts.webSearch) body.plugins = [{ id: 'web' }];
+  if (stream) body.stream_options = { include_usage: true };
   return body;
 }
 
@@ -79,9 +80,27 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
   }
 }
 
-/** Streaming completion. Yields content deltas. Throws on non-OK response. */
-export async function* chatStream(opts: ChatOptions): AsyncGenerator<string> {
+export interface StreamMeta {
+  usage?: Usage;
+  latencyMs: number;
+}
+
+/** Streaming completion. Yields content deltas; calls onDone once with usage +
+ *  latency when the stream ends. Throws on non-OK response. */
+export async function* chatStream(
+  opts: ChatOptions,
+  onDone?: (m: StreamMeta) => void,
+): AsyncGenerator<string> {
   if (!opts.apiKey) throw new Error('No OpenRouter key set');
+  const start = Date.now();
+  let usage: Usage | undefined;
+  let finished = false;
+  const finish = () => {
+    if (!finished) {
+      finished = true;
+      onDone?.({ usage, latencyMs: Date.now() - start });
+    }
+  };
   const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
     method: 'POST',
     headers: headers(opts.apiKey),
@@ -95,25 +114,33 @@ export async function* chatStream(opts: ChatOptions): AsyncGenerator<string> {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    for (const line of lines) {
-      const t = line.trim();
-      if (!t.startsWith('data:')) continue;
-      const data = t.slice(5).trim();
-      if (data === '[DONE]') return;
-      try {
-        const obj = JSON.parse(data);
-        const delta = obj.choices?.[0]?.delta?.content;
-        if (delta) yield delta as string;
-      } catch {
-        /* keepalive / partial line */
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t.startsWith('data:')) continue;
+        const data = t.slice(5).trim();
+        if (data === '[DONE]') {
+          finish();
+          return;
+        }
+        try {
+          const obj = JSON.parse(data);
+          if (obj.usage) usage = obj.usage;
+          const delta = obj.choices?.[0]?.delta?.content;
+          if (delta) yield delta as string;
+        } catch {
+          /* keepalive / partial line */
+        }
       }
     }
+  } finally {
+    finish();
   }
 }
 
@@ -151,6 +178,94 @@ export async function fileToAudio(file: File): Promise<{ data: string; format: s
 export interface OrModel {
   id: string;
   name?: string;
+}
+
+// ── Staged pipeline: OCR / STT run as their own visible steps ─────────
+export type StageName = 'ocr' | 'stt' | 'answer';
+
+export interface Stage {
+  name: StageName;
+  label: string;
+  text: string;
+  usage?: Usage;
+  latencyMs: number;
+  error?: string;
+}
+
+export interface PipelineResult {
+  stages: Stage[];
+  answer: string;
+  totalLatencyMs: number;
+  totalTokens: number;
+  error?: string;
+}
+
+export interface PipelineInput {
+  model: string;
+  apiKey: string;
+  prompt: string;
+  temperature?: number;
+  webSearch?: boolean;
+  imageDataUrl?: string;
+  audio?: { data: string; format: string };
+  signal?: AbortSignal;
+}
+
+const OCR_INSTRUCTION =
+  'Extract ALL text from this image, verbatim, preserving line breaks. If the image contains no text, briefly describe it. Output only the result — no preamble or commentary.';
+const STT_INSTRUCTION =
+  'Transcribe this audio verbatim. Output only the transcript — no preamble or commentary.';
+
+/** Run OCR (if image) and/or STT (if audio) as separate steps, then answer the
+ *  prompt using the extracted text. Each step reports its own text + usage + ms. */
+export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
+  const stages: Stage[] = [];
+  let ocrText = '';
+  let sttText = '';
+
+  if (inp.imageDataUrl) {
+    const r = await chat({
+      model: inp.model,
+      apiKey: inp.apiKey,
+      temperature: 0,
+      signal: inp.signal,
+      messages: [userMessage(OCR_INSTRUCTION, inp.imageDataUrl)],
+    });
+    stages.push({ name: 'ocr', label: 'OCR — read', text: r.text, usage: r.usage, latencyMs: r.latencyMs, error: r.error });
+    ocrText = r.text;
+  }
+
+  if (inp.audio) {
+    const r = await chat({
+      model: inp.model,
+      apiKey: inp.apiKey,
+      temperature: 0,
+      signal: inp.signal,
+      messages: [userMessage(STT_INSTRUCTION, undefined, inp.audio)],
+    });
+    stages.push({ name: 'stt', label: 'STT — transcript', text: r.text, usage: r.usage, latencyMs: r.latencyMs, error: r.error });
+    sttText = r.text;
+  }
+
+  let context = '';
+  if (ocrText) context += `\n\n[Text extracted from the image]\n${ocrText}`;
+  if (sttText) context += `\n\n[Audio transcript]\n${sttText}`;
+  const answerPrompt = (inp.prompt?.trim() || 'Analyze the provided content.') + context;
+
+  const r = await chat({
+    model: inp.model,
+    apiKey: inp.apiKey,
+    temperature: inp.temperature,
+    webSearch: inp.webSearch,
+    signal: inp.signal,
+    messages: [userMessage(answerPrompt)],
+  });
+  stages.push({ name: 'answer', label: 'Answer', text: r.text, usage: r.usage, latencyMs: r.latencyMs, error: r.error });
+
+  const totalLatencyMs = stages.reduce((s, x) => s + (x.latencyMs || 0), 0);
+  const totalTokens = stages.reduce((s, x) => s + (x.usage?.total_tokens || 0), 0);
+  const error = stages.find((s) => s.error)?.error;
+  return { stages, answer: r.text, totalLatencyMs, totalTokens, error };
 }
 
 /** Live model list from OpenRouter (public; no key needed). */

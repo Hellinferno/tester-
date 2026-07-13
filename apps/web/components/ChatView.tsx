@@ -3,16 +3,27 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUp, ImageIcon, Loader2, Mic, Sparkles, Trash2, X } from 'lucide-react';
 import { RunSettings } from './RunSettings';
+import { StageBlock } from './StageBlock';
 import {
   ChatMessage,
+  Stage,
+  StreamMeta,
   chatStream,
   fileToAudio,
   fileToDataURL,
+  runPipeline,
   userMessage,
 } from '../lib/openrouter';
 import { getOpenRouterKey, getStored, setStored } from '../lib/settings';
 
-type Turn = { role: 'user' | 'assistant'; text: string; imageName?: string; audioName?: string };
+type Turn = {
+  role: 'user' | 'assistant';
+  text: string;
+  imageName?: string;
+  audioName?: string;
+  stages?: Stage[];
+  metrics?: { tokens?: number; latencyMs?: number };
+};
 
 export const ChatView: React.FC = () => {
   const [model, setModel] = useState('');
@@ -57,6 +68,7 @@ export const ChatView: React.FC = () => {
     if (!apiKey) return setError('Add your OpenRouter key in the sidebar first.');
     if (!model.trim()) return setError('Pick a model in Run settings.');
 
+    const hasMedia = !!image || !!audio;
     const imageDataUrl = image ? await fileToDataURL(image) : undefined;
     const audioPart = audio ? await fileToAudio(audio) : undefined;
 
@@ -64,24 +76,56 @@ export const ChatView: React.FC = () => {
     const history = [...turns, userTurn];
     setTurns(history);
 
-    const messages: ChatMessage[] = [];
-    if (systemPrompt.trim()) messages.push({ role: 'system', content: systemPrompt });
-    for (const t of turns) messages.push({ role: t.role, content: t.text });
-    messages.push(userMessage(text, imageDataUrl, audioPart));
-
+    const promptText = text;
     setText('');
     setImage(null);
     setAudio(null);
     setStreaming(true);
     setStreamText('');
 
+    if (hasMedia) {
+      // Staged pipeline: OCR/STT run as visible steps, each with its own metrics.
+      const result = await runPipeline({
+        model,
+        apiKey,
+        temperature,
+        webSearch,
+        prompt: promptText,
+        imageDataUrl,
+        audio: audioPart,
+      });
+      setTurns([
+        ...history,
+        {
+          role: 'assistant',
+          text: result.answer,
+          stages: result.stages,
+          metrics: { tokens: result.totalTokens, latencyMs: result.totalLatencyMs },
+        },
+      ]);
+      setStreaming(false);
+      return;
+    }
+
+    // Pure text chat: stream, and capture usage + latency from the final chunk.
+    const messages: ChatMessage[] = [];
+    if (systemPrompt.trim()) messages.push({ role: 'system', content: systemPrompt });
+    for (const t of turns) messages.push({ role: t.role, content: t.text });
+    messages.push(userMessage(promptText));
+
     let acc = '';
+    let meta: StreamMeta | undefined;
     try {
-      for await (const delta of chatStream({ model, messages, apiKey, temperature, webSearch })) {
+      for await (const delta of chatStream({ model, messages, apiKey, temperature, webSearch }, (m) => {
+        meta = m;
+      })) {
         acc += delta;
         setStreamText(acc);
       }
-      setTurns([...history, { role: 'assistant', text: acc }]);
+      setTurns([
+        ...history,
+        { role: 'assistant', text: acc, metrics: { tokens: meta?.usage?.total_tokens, latencyMs: meta?.latencyMs } },
+      ]);
     } catch (e: any) {
       setTurns([...history, { role: 'assistant', text: acc || `⚠ ${String(e?.message || e)}` }]);
     } finally {
@@ -147,7 +191,31 @@ export const ChatView: React.FC = () => {
                       <div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-studio-blue text-white">
                         <Sparkles className="h-4 w-4" />
                       </div>
-                      <div className="min-w-0 flex-1 whitespace-pre-wrap text-[15px] leading-7">{t.text}</div>
+                      <div className="min-w-0 flex-1">
+                        {t.stages ? (
+                          <div className="space-y-2">
+                            {t.stages.map((s, si) => (
+                              <StageBlock key={si} stage={s} muted={s.name !== 'answer'} />
+                            ))}
+                            {t.metrics?.latencyMs != null && (
+                              <div className="px-1 text-[11px] text-studio-faint">
+                                total {t.metrics.tokens ? `${t.metrics.tokens} tok · ` : ''}
+                                {t.metrics.latencyMs} ms
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <>
+                            <div className="whitespace-pre-wrap text-[15px] leading-7">{t.text}</div>
+                            {t.metrics?.latencyMs != null && (
+                              <div className="mt-1 text-[11px] text-studio-faint">
+                                {t.metrics.tokens != null ? `${t.metrics.tokens} tok · ` : ''}
+                                {t.metrics.latencyMs} ms
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
                   ),
                 )}

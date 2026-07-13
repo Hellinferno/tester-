@@ -3,11 +3,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check, Download, Loader2, Play, Plus, Square, X } from 'lucide-react';
 import { ModelInput } from './ModelInput';
-import { chat, fileToDataURL, userMessage } from '../lib/openrouter';
+import { StageBlock } from './StageBlock';
+import { fileToDataURL, PipelineResult, runPipeline } from '../lib/openrouter';
 import { getOpenRouterKey, getStored, setStored } from '../lib/settings';
 
 type EvalInput = { id: string; file: File; dataUrl: string; prompt: string };
-type Cell = { status: 'idle' | 'running' | 'done' | 'error'; text?: string; error?: string; latencyMs?: number; tokens?: number };
+type Cell = { status: 'idle' | 'running' | 'done' | 'error'; result?: PipelineResult };
 type Results = Record<string, Record<string, Cell>>;
 
 let idSeq = 0;
@@ -70,20 +71,15 @@ export const EvalsConsole: React.FC = () => {
         if (stopRef.current) break outer;
         setCell(input.id, model, { status: 'running' });
         setProgress(`${done + 1} / ${total}`);
-        const res = await chat({
+        const result = await runPipeline({
           model,
           apiKey,
           temperature,
           webSearch,
-          messages: [userMessage(input.prompt, input.dataUrl)],
+          prompt: input.prompt,
+          imageDataUrl: input.dataUrl,
         });
-        setCell(
-          input.id,
-          model,
-          res.error
-            ? { status: 'error', error: res.error, latencyMs: res.latencyMs }
-            : { status: 'done', text: res.text, latencyMs: res.latencyMs, tokens: res.usage?.total_tokens },
-        );
+        setCell(input.id, model, { status: result.error ? 'error' : 'done', result });
         done++;
       }
     }
@@ -95,7 +91,16 @@ export const EvalsConsole: React.FC = () => {
     const payload = inputs.map((inp) => ({
       image: inp.file.name,
       prompt: inp.prompt,
-      results: models.map((m) => ({ model: m, ...(results[inp.id]?.[m] || {}) })),
+      results: models.map((m) => {
+        const cell = results[inp.id]?.[m];
+        return {
+          model: m,
+          status: cell?.status,
+          stages: cell?.result?.stages,
+          totalTokens: cell?.result?.totalTokens,
+          totalLatencyMs: cell?.result?.totalLatencyMs,
+        };
+      }),
     }));
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -229,21 +234,21 @@ export const EvalsConsole: React.FC = () => {
                     {models.map((m) => {
                       const cell = results[inp.id]?.[m];
                       return (
-                        <div key={m} className="rounded-lg border border-studio-line bg-studio-surface p-2.5">
-                          <div className="mb-1 flex items-center justify-between">
+                        <div key={m} className="rounded-lg border border-studio-line bg-white p-2.5">
+                          <div className="mb-2 flex items-center justify-between">
                             <span className="truncate text-[11px] font-medium text-studio-muted">{m}</span>
                             <StatusDot cell={cell} />
                           </div>
-                          <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-5 text-studio-text">
-                            {cell?.status === 'running' && <span className="text-studio-muted">running…</span>}
-                            {cell?.status === 'error' && <span className="text-red-600">{cell.error}</span>}
-                            {cell?.status === 'done' && (cell.text || '(empty)')}
-                            {!cell && <span className="text-studio-faint">—</span>}
-                          </div>
-                          {cell?.status === 'done' && (
-                            <div className="mt-1.5 flex gap-3 text-[10px] text-studio-faint">
-                              <span>{cell.latencyMs} ms</span>
-                              {cell.tokens != null && <span>{cell.tokens} tok</span>}
+                          {!cell && <span className="text-xs text-studio-faint">—</span>}
+                          {cell?.status === 'running' && <span className="text-xs text-studio-muted">running…</span>}
+                          {cell?.result && (
+                            <div className="space-y-2">
+                              {cell.result.stages.map((s, si) => (
+                                <StageBlock key={si} stage={s} muted={s.name !== 'answer'} />
+                              ))}
+                              <div className="font-mono text-[10px] text-studio-faint">
+                                total {cell.result.totalTokens} tok · {cell.result.totalLatencyMs} ms
+                              </div>
                             </div>
                           )}
                         </div>
