@@ -25,11 +25,10 @@ type Turn = {
   metrics?: { tokens?: number; latencyMs?: number };
 };
 
-const CALL_TIMEOUT_MS = 90_000;
-
 export const ChatView: React.FC = () => {
   const [model, setModel] = useState('');
   const [temperature, setTemperature] = useState(0.7);
+  const [timeoutSec, setTimeoutSec] = useState(90);
   const [webSearch, setWebSearch] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
 
@@ -50,11 +49,13 @@ export const ChatView: React.FC = () => {
   useEffect(() => {
     setModel(getStored('or.chat.model', ''));
     setTemperature(getStored('or.chat.temp', 0.7));
+    setTimeoutSec(getStored('or.chat.timeout', 90));
     setWebSearch(getStored('or.chat.web', false));
     setSystemPrompt(getStored('or.chat.system', ''));
   }, []);
   useEffect(() => setStored('or.chat.model', model), [model]);
   useEffect(() => setStored('or.chat.temp', temperature), [temperature]);
+  useEffect(() => setStored('or.chat.timeout', timeoutSec), [timeoutSec]);
   useEffect(() => setStored('or.chat.web', webSearch), [webSearch]);
   useEffect(() => setStored('or.chat.system', systemPrompt), [systemPrompt]);
 
@@ -93,6 +94,7 @@ export const ChatView: React.FC = () => {
 
     const controller = new AbortController();
     abortRef.current = controller;
+    const timeoutMs = timeoutSec > 0 ? timeoutSec * 1000 : undefined;
 
     if (hasMedia) {
       // Staged pipeline: OCR (per image) / STT run as visible steps with metrics.
@@ -105,7 +107,7 @@ export const ChatView: React.FC = () => {
         images: imageDataUrls,
         audio: audioPart,
         signal: controller.signal,
-        timeoutMs: CALL_TIMEOUT_MS,
+        timeoutMs,
       });
       setTurns([
         ...history,
@@ -130,7 +132,7 @@ export const ChatView: React.FC = () => {
     let meta: StreamMeta | undefined;
     try {
       for await (const delta of chatStream(
-        { model, messages, apiKey, temperature, webSearch, signal: controller.signal, timeoutMs: CALL_TIMEOUT_MS },
+        { model, messages, apiKey, temperature, webSearch, signal: controller.signal, timeoutMs },
         (m) => {
           meta = m;
         },
@@ -325,12 +327,15 @@ export const ChatView: React.FC = () => {
         setModel={setModel}
         temperature={temperature}
         setTemperature={setTemperature}
+        timeoutSec={timeoutSec}
+        setTimeoutSec={setTimeoutSec}
         webSearch={webSearch}
         setWebSearch={setWebSearch}
         systemPrompt={systemPrompt}
         setSystemPrompt={setSystemPrompt}
         onReset={() => {
           setTemperature(0.7);
+          setTimeoutSec(90);
           setWebSearch(false);
           setSystemPrompt('');
         }}

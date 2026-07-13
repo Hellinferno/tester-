@@ -9,6 +9,8 @@ interface RunSettingsProps {
   setModel: (v: string) => void;
   temperature: number;
   setTemperature: (v: number) => void;
+  timeoutSec: number;
+  setTimeoutSec: (v: number) => void;
   webSearch: boolean;
   setWebSearch: (v: boolean) => void;
   systemPrompt: string;
@@ -35,6 +37,8 @@ export const RunSettings: React.FC<RunSettingsProps> = ({
   setModel,
   temperature,
   setTemperature,
+  timeoutSec,
+  setTimeoutSec,
   webSearch,
   setWebSearch,
   systemPrompt,
@@ -83,6 +87,21 @@ export const RunSettings: React.FC<RunSettingsProps> = ({
             onChange={(e) => setTemperature(Number(e.target.value))}
             className="w-full"
           />
+        </section>
+
+        <section>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-studio-muted">Timeout (s)</label>
+            <input
+              type="number"
+              min={0}
+              step={5}
+              value={timeoutSec}
+              onChange={(e) => setTimeoutSec(Math.max(0, Number(e.target.value)))}
+              className="w-16 rounded-md border border-studio-border bg-white px-2 py-1 text-right text-sm text-studio-text focus:border-studio-blue focus:outline-none"
+            />
+          </div>
+          <p className="mt-1 text-xs text-studio-faint">Per call. 0 = no limit.</p>
         </section>
 
         <section>
