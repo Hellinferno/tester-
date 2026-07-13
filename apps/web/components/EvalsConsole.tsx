@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, Download, FolderOpen, ImageIcon, Loader2, Mic, Play, Plus, Save, Square, X } from 'lucide-react';
+import { AlertTriangle, Check, Download, FolderOpen, ImageIcon, Loader2, Mic, Play, Plus, Square, X } from 'lucide-react';
 import { ModelInput } from './ModelInput';
 import { StageBlock } from './StageBlock';
 import { fetchModelsCached, fileToAudio, fileToDataURL, modelInputs, OrModel, PipelineResult, pricingFor, runPipeline } from '../lib/openrouter';
@@ -157,11 +157,6 @@ export const EvalsConsole: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const saveDataset = () => {
-    const data = { version: 1, models, temperature, timeoutSec, webSearch, inputs };
-    download('evals-dataset.json', JSON.stringify(data), 'application/json');
-  };
-
   const loadDataset = async (file: File | null) => {
     if (!file) return;
     try {
@@ -311,9 +306,6 @@ export const EvalsConsole: React.FC = () => {
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-xs font-medium text-studio-muted">Dataset — inputs ({inputs.length})</h3>
           <div className="flex gap-2">
-            <button onClick={saveDataset} disabled={!inputs.length} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover disabled:opacity-40">
-              <Save className="h-3.5 w-3.5" /> Save
-            </button>
             <button onClick={() => datasetInput.current?.click()} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
               <FolderOpen className="h-3.5 w-3.5" /> Load
             </button>
