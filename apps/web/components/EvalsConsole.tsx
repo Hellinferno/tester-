@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, Download, FolderOpen, ImageIcon, Loader2, Mic, Play, Plus, Square, X } from 'lucide-react';
+import { AlertTriangle, Check, Download, FolderOpen, ImageIcon, Loader2, Mic, Play, Plus, Square, Upload, X } from 'lucide-react';
 import { ModelInput } from './ModelInput';
 import { StageBlock } from './StageBlock';
 import { fileToAudio, fileToDataURL, modelInputs, OrModel, PipelineResult, pricingFor, runPipeline } from '../lib/openrouter';
@@ -42,6 +42,7 @@ export const EvalsConsole: React.FC = () => {
   const itemImageInput = useRef<HTMLInputElement>(null);
   const itemVoiceInput = useRef<HTMLInputElement>(null);
   const datasetInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
   const targetItem = useRef<string>('');
 
   useEffect(() => {
@@ -74,6 +75,36 @@ export const EvalsConsole: React.FC = () => {
       items.push({ id: `in-${++idSeq}`, images: [{ name: file.name, dataUrl: await fileToDataURL(file) }], voice: null, prompt: '' });
     }
     setInputs((prev) => [...prev, ...items]);
+  };
+
+  // Import a whole folder (e.g. one holding an images/ and a voice/ subfolder).
+  // Pairs the i-th image with the i-th audio by sorted filename → one item each,
+  // so image 1 runs with voice 1, image 2 with voice 2, and so on. Leftover
+  // images/voices (unequal counts) become image-only / voice-only items.
+  const addFolder = async (files: FileList | null) => {
+    if (!files || !files.length) return;
+    const arr = Array.from(files);
+    const isImg = (f: File) => f.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i.test(f.name);
+    const isAud = (f: File) => f.type.startsWith('audio/') || /\.(mp3|wav|m4a|ogg|opus|flac|aac|webm)$/i.test(f.name);
+    const key = (f: File) => (f as unknown as { webkitRelativePath?: string }).webkitRelativePath || f.name;
+    const byName = (a: File, b: File) => key(a).localeCompare(key(b), undefined, { numeric: true, sensitivity: 'base' });
+    const imgs = arr.filter(isImg).sort(byName);
+    const auds = arr.filter(isAud).sort(byName);
+    if (!imgs.length && !auds.length) return setError('That folder had no images or audio files.');
+    const n = Math.max(imgs.length, auds.length);
+    const items: EvalInput[] = [];
+    for (let i = 0; i < n; i++) {
+      const img = imgs[i];
+      const aud = auds[i];
+      items.push({
+        id: `in-${++idSeq}`,
+        images: img ? [{ name: img.name, dataUrl: await fileToDataURL(img) }] : [],
+        voice: aud ? { name: aud.name, ...(await fileToAudio(aud)) } : null,
+        prompt: '',
+      });
+    }
+    setInputs((prev) => [...prev, ...items]);
+    setError('');
   };
 
   const addImagesToTarget = async (files: FileList | null) => {
@@ -326,6 +357,9 @@ export const EvalsConsole: React.FC = () => {
             <button onClick={() => bulkInput.current?.click()} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
               <ImageIcon className="h-3.5 w-3.5" /> Bulk images
             </button>
+            <button onClick={() => folderInput.current?.click()} title="Pick a folder (with images + voice subfolders). Pairs image 1 with voice 1, etc." className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
+              <Upload className="h-3.5 w-3.5" /> Folder (img+voice)
+            </button>
           </div>
         </div>
 
@@ -434,6 +468,7 @@ export const EvalsConsole: React.FC = () => {
       <input ref={itemImageInput} type="file" accept="image/*" multiple hidden onChange={(e) => { addImagesToTarget(e.target.files); e.currentTarget.value = ''; }} />
       <input ref={itemVoiceInput} type="file" accept="audio/*" hidden onChange={(e) => { setVoiceForTarget(e.target.files?.[0] || null); e.currentTarget.value = ''; }} />
       <input ref={datasetInput} type="file" accept="application/json,.json" hidden onChange={(e) => { loadDataset(e.target.files?.[0] || null); e.currentTarget.value = ''; }} />
+      <input ref={folderInput} type="file" multiple hidden {...({ webkitdirectory: '', directory: '' } as Record<string, string>)} onChange={(e) => { addFolder(e.target.files); e.currentTarget.value = ''; }} />
     </section>
   );
 };
