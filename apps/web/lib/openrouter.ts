@@ -235,9 +235,9 @@ export interface PipelineInput {
   pricing?: { prompt: number; completion: number };
 }
 
-const OCR_INSTRUCTION =
+export const OCR_INSTRUCTION =
   'Extract ALL text from this image, verbatim, preserving line breaks. If the image contains no text, briefly describe it. Output only the result — no preamble or commentary.';
-const STT_INSTRUCTION =
+export const STT_INSTRUCTION =
   'Transcribe this audio verbatim. Output only the transcript — no preamble or commentary.';
 
 /** Run OCR (if image) and/or STT (if audio) as separate steps, then answer the
