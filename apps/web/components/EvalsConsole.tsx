@@ -38,7 +38,6 @@ export const EvalsConsole: React.FC = () => {
   const [modelList, setModelList] = useState<OrModel[]>([]);
   const stopRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
-  const bulkInput = useRef<HTMLInputElement>(null);
   const itemImageInput = useRef<HTMLInputElement>(null);
   const itemVoiceInput = useRef<HTMLInputElement>(null);
   const datasetInput = useRef<HTMLInputElement>(null);
@@ -67,15 +66,6 @@ export const EvalsConsole: React.FC = () => {
     setInputs((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
 
   const addBlankInput = () => setInputs((prev) => [...prev, { id: `in-${++idSeq}`, images: [], voice: null, prompt: '' }]);
-
-  const addBulkImages = async (files: FileList | null) => {
-    if (!files) return;
-    const items: EvalInput[] = [];
-    for (const file of Array.from(files)) {
-      items.push({ id: `in-${++idSeq}`, images: [{ name: file.name, dataUrl: await fileToDataURL(file) }], voice: null, prompt: '' });
-    }
-    setInputs((prev) => [...prev, ...items]);
-  };
 
   // Import a whole folder (e.g. one holding an images/ and a voice/ subfolder).
   // Pairs the i-th image with the i-th audio by sorted filename → one item each,
@@ -354,9 +344,6 @@ export const EvalsConsole: React.FC = () => {
             <button onClick={addBlankInput} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
               <Plus className="h-3.5 w-3.5" /> Add input
             </button>
-            <button onClick={() => bulkInput.current?.click()} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
-              <ImageIcon className="h-3.5 w-3.5" /> Bulk images
-            </button>
             <button onClick={() => folderInput.current?.click()} title="Pick a folder (with images + voice subfolders). Pairs image 1 with voice 1, etc." className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
               <Upload className="h-3.5 w-3.5" /> Folder (img+voice)
             </button>
@@ -464,7 +451,6 @@ export const EvalsConsole: React.FC = () => {
       </div>
 
       {/* hidden inputs */}
-      <input ref={bulkInput} type="file" accept="image/*" multiple hidden onChange={(e) => { addBulkImages(e.target.files); e.currentTarget.value = ''; }} />
       <input ref={itemImageInput} type="file" accept="image/*" multiple hidden onChange={(e) => { addImagesToTarget(e.target.files); e.currentTarget.value = ''; }} />
       <input ref={itemVoiceInput} type="file" accept="audio/*" hidden onChange={(e) => { setVoiceForTarget(e.target.files?.[0] || null); e.currentTarget.value = ''; }} />
       <input ref={datasetInput} type="file" accept="application/json,.json" hidden onChange={(e) => { loadDataset(e.target.files?.[0] || null); e.currentTarget.value = ''; }} />
