@@ -4,9 +4,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, Download, FolderOpen, ImageIcon, Loader2, Mic, Play, Plus, Square, X } from 'lucide-react';
 import { ModelInput } from './ModelInput';
 import { StageBlock } from './StageBlock';
-import { fetchModelsCached, fileToAudio, fileToDataURL, modelInputs, OrModel, PipelineResult, pricingFor, runPipeline } from '../lib/openrouter';
-import { fetchGeminiModels } from '../lib/gemini';
-import { getGeminiKey, getOpenRouterKey, getStored, setStored } from '../lib/settings';
+import { fileToAudio, fileToDataURL, modelInputs, OrModel, PipelineResult, pricingFor, runPipeline } from '../lib/openrouter';
+import { getStored, setStored } from '../lib/settings';
+import { activeBaseUrl, activeKey, fetchProviderModels, providerNotReady } from '../lib/providers';
 import { useProvider } from '../lib/providerContext';
 
 type EvalImage = { name: string; dataUrl: string };
@@ -50,7 +50,7 @@ export const EvalsConsole: React.FC = () => {
     setWebSearch(getStored('or.eval.web', false));
   }, []);
   useEffect(() => {
-    (provider === 'gemini' ? fetchGeminiModels(getGeminiKey()) : fetchModelsCached()).then(setModelList);
+    fetchProviderModels(provider).then(setModelList);
   }, [provider]);
   useEffect(() => setStored('or.eval.models', models), [models]);
   useEffect(() => setStored('or.eval.temp', temperature), [temperature]);
@@ -100,8 +100,10 @@ export const EvalsConsole: React.FC = () => {
 
   const runAll = async () => {
     setError('');
-    const apiKey = provider === 'gemini' ? getGeminiKey() : getOpenRouterKey();
-    if (!apiKey) return setError(`Add your ${provider === 'gemini' ? 'Gemini' : 'OpenRouter'} key in the sidebar first.`);
+    const notReady = providerNotReady(provider);
+    if (notReady) return setError(notReady);
+    const apiKey = activeKey(provider);
+    const baseUrl = activeBaseUrl(provider);
     if (!models.length) return setError('Add at least one model to compare.');
     if (!inputs.length) return setError('Add at least one input.');
 
@@ -127,6 +129,7 @@ export const EvalsConsole: React.FC = () => {
           model,
           apiKey,
           provider,
+          baseUrl,
           temperature,
           webSearch,
           prompt: input.prompt,

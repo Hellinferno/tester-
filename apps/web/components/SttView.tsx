@@ -3,18 +3,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check, Copy, Loader2, Mic, Play, Plus, Square, X } from 'lucide-react';
 import { ModelInput } from './ModelInput';
-import {
-  STT_INSTRUCTION,
-  OrModel,
-  chat,
-  fetchModelsCached,
-  fileToAudio,
-  pricingFor,
-  usdCost,
-  userMessage,
-} from '../lib/openrouter';
-import { fetchGeminiModels } from '../lib/gemini';
-import { getGeminiKey, getOpenRouterKey, getStored, setStored } from '../lib/settings';
+import { STT_INSTRUCTION, OrModel, chat, fileToAudio, pricingFor, usdCost, userMessage } from '../lib/openrouter';
+import { getStored, setStored } from '../lib/settings';
+import { activeBaseUrl, activeKey, fetchProviderModels, providerNotReady } from '../lib/providers';
 import { useProvider } from '../lib/providerContext';
 
 type SttItem = {
@@ -53,7 +44,7 @@ export const SttView: React.FC = () => {
   useEffect(() => setStored('or.stt.model', model), [model]);
   useEffect(() => setStored('or.stt.maxtok', maxTokens), [maxTokens]);
   useEffect(() => {
-    (provider === 'gemini' ? fetchGeminiModels(getGeminiKey()) : fetchModelsCached()).then(setModelList);
+    fetchProviderModels(provider).then(setModelList);
   }, [provider]);
 
   const addAudio = async (files: FileList | null) => {
@@ -70,8 +61,10 @@ export const SttView: React.FC = () => {
 
   const runAll = async () => {
     setError('');
-    const apiKey = provider === 'gemini' ? getGeminiKey() : getOpenRouterKey();
-    if (!apiKey) return setError(`Add your ${provider === 'gemini' ? 'Gemini' : 'OpenRouter'} key in the sidebar first.`);
+    const notReady = providerNotReady(provider);
+    if (notReady) return setError(notReady);
+    const apiKey = activeKey(provider);
+    const baseUrl = activeBaseUrl(provider);
     if (!model.trim()) return setError('Pick an audio-capable model first.');
     if (!items.length) return setError('Add at least one audio file.');
 
@@ -88,6 +81,7 @@ export const SttView: React.FC = () => {
         model,
         apiKey,
         provider,
+        baseUrl,
         temperature: 0,
         maxTokens,
         timeoutMs: 120_000,

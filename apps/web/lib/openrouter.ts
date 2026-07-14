@@ -5,7 +5,7 @@
 import { abortMessage, errorDetail, makeSignal } from './signal';
 import { geminiChat, geminiChatStream } from './gemini';
 
-export type Provider = 'openrouter' | 'gemini';
+export type Provider = 'openrouter' | 'gemini' | 'custom';
 
 export const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 
@@ -30,6 +30,7 @@ export interface ChatOptions {
   messages: ChatMessage[];
   apiKey: string;
   provider?: Provider;
+  baseUrl?: string;
   temperature?: number;
   webSearch?: boolean;
   maxTokens?: number;
@@ -37,7 +38,12 @@ export interface ChatOptions {
   timeoutMs?: number;
 }
 
-function headers(apiKey: string): Record<string, string> {
+function headers(apiKey: string, custom: boolean): Record<string, string> {
+  // Custom endpoints get minimal headers so strict CORS servers don't reject
+  // the preflight over the OpenRouter-specific ones.
+  if (custom) {
+    return { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+  }
   return {
     Authorization: `Bearer ${apiKey}`,
     'Content-Type': 'application/json',
@@ -53,7 +59,8 @@ function requestBody(opts: ChatOptions, stream: boolean) {
     temperature: opts.temperature ?? 0.7,
     stream,
   };
-  if (opts.webSearch) body.plugins = [{ id: 'web' }];
+  // The web-search plugin is OpenRouter-only — don't send it to custom endpoints.
+  if (opts.webSearch && opts.provider !== 'custom') body.plugins = [{ id: 'web' }];
   if (opts.maxTokens && opts.maxTokens > 0) body.max_tokens = opts.maxTokens;
   if (stream) body.stream_options = { include_usage: true };
   return body;
@@ -70,12 +77,14 @@ export interface ChatResult {
 export async function chat(opts: ChatOptions): Promise<ChatResult> {
   if (opts.provider === 'gemini') return geminiChat(opts);
   const start = Date.now();
-  if (!opts.apiKey) return { text: '', latencyMs: 0, error: 'No OpenRouter key set' };
+  if (!opts.apiKey) return { text: '', latencyMs: 0, error: 'No API key set' };
+  const custom = opts.provider === 'custom';
+  const base = opts.baseUrl || OPENROUTER_BASE;
   const { signal, done } = makeSignal(opts.signal, opts.timeoutMs);
   try {
-    const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
+    const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
-      headers: headers(opts.apiKey),
+      headers: headers(opts.apiKey, custom),
       body: JSON.stringify(requestBody(opts, false)),
       signal,
     });
@@ -108,7 +117,7 @@ export async function* chatStream(
     yield* geminiChatStream(opts, onDone);
     return;
   }
-  if (!opts.apiKey) throw new Error('No OpenRouter key set');
+  if (!opts.apiKey) throw new Error('No API key set');
   const start = Date.now();
   let usage: Usage | undefined;
   let finished = false;
@@ -118,11 +127,13 @@ export async function* chatStream(
       onDone?.({ usage, latencyMs: Date.now() - start });
     }
   };
+  const custom = opts.provider === 'custom';
+  const base = opts.baseUrl || OPENROUTER_BASE;
   const { signal, done } = makeSignal(opts.signal, opts.timeoutMs);
   try {
-    const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
+    const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
-      headers: headers(opts.apiKey),
+      headers: headers(opts.apiKey, custom),
       body: JSON.stringify(requestBody(opts, true)),
       signal,
     });
@@ -224,6 +235,7 @@ export interface PipelineInput {
   model: string;
   apiKey: string;
   provider?: Provider;
+  baseUrl?: string;
   prompt: string;
   temperature?: number;
   webSearch?: boolean;
@@ -253,6 +265,7 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
       model: inp.model,
       apiKey: inp.apiKey,
       provider: inp.provider,
+      baseUrl: inp.baseUrl,
       temperature: 0,
       signal: inp.signal,
       timeoutMs: inp.timeoutMs,
@@ -274,6 +287,7 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
       model: inp.model,
       apiKey: inp.apiKey,
       provider: inp.provider,
+      baseUrl: inp.baseUrl,
       temperature: 0,
       signal: inp.signal,
       timeoutMs: inp.timeoutMs,
@@ -292,6 +306,7 @@ export async function runPipeline(inp: PipelineInput): Promise<PipelineResult> {
     model: inp.model,
     apiKey: inp.apiKey,
     provider: inp.provider,
+    baseUrl: inp.baseUrl,
     temperature: inp.temperature,
     webSearch: inp.webSearch,
     signal: inp.signal,
@@ -344,6 +359,24 @@ export function fetchModelsCached(): Promise<OrModel[]> {
 
 export function pricingFor(models: OrModel[], id: string): { prompt: number; completion: number } | undefined {
   return models.find((m) => m.id === id)?.pricing;
+}
+
+/** Model list from a custom OpenAI-compatible endpoint's GET /models. Returns []
+ *  if unsupported — the model field still accepts any typed id. No pricing/caps. */
+export async function fetchCustomModels(baseUrl: string, key: string): Promise<OrModel[]> {
+  if (!baseUrl) return [];
+  try {
+    const res = await fetch(`${baseUrl}/models`, { headers: key ? { Authorization: `Bearer ${key}` } : {} });
+    if (!res.ok) return [];
+    const json = await res.json();
+    const list = json.data || json.models || [];
+    return list
+      .map((m: any) => ({ id: String(m.id || m.name || ''), name: m.id || m.name }))
+      .filter((m: OrModel) => m.id)
+      .sort((a: OrModel, b: OrModel) => a.id.localeCompare(b.id));
+  } catch {
+    return [];
+  }
 }
 
 /** Input modalities the model accepts, or undefined if unknown (custom id / not

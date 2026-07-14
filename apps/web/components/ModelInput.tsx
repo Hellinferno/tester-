@@ -1,17 +1,16 @@
 'use client';
 
 import React, { useEffect, useId, useState } from 'react';
-import { fetchModelsCached, OrModel, Provider } from '../lib/openrouter';
-import { fetchGeminiModels } from '../lib/gemini';
-import { getGeminiKey, getStored, setStored } from '../lib/settings';
+import { OrModel, Provider } from '../lib/openrouter';
+import { fetchProviderModels } from '../lib/providers';
+import { getStored, setStored } from '../lib/settings';
 import { useProvider } from '../lib/providerContext';
 
 function useLiveModels(provider: Provider): OrModel[] {
   const [models, setModels] = useState<OrModel[]>([]);
   useEffect(() => {
     let alive = true;
-    const load = provider === 'gemini' ? fetchGeminiModels(getGeminiKey()) : fetchModelsCached();
-    load.then((m) => {
+    fetchProviderModels(provider).then((m) => {
       if (alive) setModels(m);
     });
     return () => {
@@ -40,7 +39,7 @@ export const ModelInput: React.FC<ModelInputProps> = ({ value, onChange, placeho
 
   useEffect(() => setVisionOnly(getStored('or.model.visionOnly', false)), []);
 
-  const models = visionOnly ? all.filter((m) => m.inputs?.includes('image')) : all;
+  const models = visionOnly ? all.filter((m) => !m.inputs || m.inputs.includes('image')) : all;
 
   return (
     <div>

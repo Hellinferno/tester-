@@ -10,7 +10,6 @@ import {
   Stage,
   StreamMeta,
   chatStream,
-  fetchModelsCached,
   fileToAudio,
   fileToDataURL,
   pricingFor,
@@ -18,8 +17,8 @@ import {
   usdCost,
   userMessage,
 } from '../lib/openrouter';
-import { fetchGeminiModels } from '../lib/gemini';
-import { getGeminiKey, getOpenRouterKey, getStored, setStored } from '../lib/settings';
+import { getStored, setStored } from '../lib/settings';
+import { activeBaseUrl, activeKey, fetchProviderModels, providerNotReady } from '../lib/providers';
 import { useProvider } from '../lib/providerContext';
 
 type Turn = {
@@ -66,7 +65,7 @@ export const ChatView: React.FC = () => {
     setSystemPrompt(getStored('or.chat.system', ''));
   }, []);
   useEffect(() => {
-    (provider === 'gemini' ? fetchGeminiModels(getGeminiKey()) : fetchModelsCached()).then(setModelList);
+    fetchProviderModels(provider).then(setModelList);
   }, [provider]);
   useEffect(() => setStored('or.chat.model', model), [model]);
   useEffect(() => setStored('or.chat.temp', temperature), [temperature]);
@@ -84,8 +83,10 @@ export const ChatView: React.FC = () => {
   const handleSend = async () => {
     if (!canSend) return;
     setError('');
-    const apiKey = provider === 'gemini' ? getGeminiKey() : getOpenRouterKey();
-    if (!apiKey) return setError(`Add your ${provider === 'gemini' ? 'Gemini' : 'OpenRouter'} key in the sidebar first.`);
+    const notReady = providerNotReady(provider);
+    if (notReady) return setError(notReady);
+    const apiKey = activeKey(provider);
+    const baseUrl = activeBaseUrl(provider);
     if (!model.trim()) return setError('Pick a model in Run settings.');
 
     const hasMedia = images.length > 0 || !!audio;
@@ -119,6 +120,7 @@ export const ChatView: React.FC = () => {
         model,
         apiKey,
         provider,
+        baseUrl,
         temperature,
         webSearch,
         prompt: promptText,
@@ -152,7 +154,7 @@ export const ChatView: React.FC = () => {
     let meta: StreamMeta | undefined;
     try {
       for await (const delta of chatStream(
-        { model, messages, apiKey, provider, temperature, webSearch, maxTokens, signal: controller.signal, timeoutMs },
+        { model, messages, apiKey, provider, baseUrl, temperature, webSearch, maxTokens, signal: controller.signal, timeoutMs },
         (m) => {
           meta = m;
         },

@@ -23,6 +23,34 @@ export function hasOpenRouterKey(): boolean {
   return getOpenRouterKey().length > 0;
 }
 
+// Custom OpenAI-compatible endpoint (any hosted router: Groq, Together, …).
+const CUSTOM_BASE_STORAGE = 'slm_custom_base';
+const CUSTOM_KEY_STORAGE = 'slm_custom_key';
+
+export function getCustomBaseUrl(): string {
+  if (typeof window === 'undefined') return '';
+  return window.localStorage.getItem(CUSTOM_BASE_STORAGE) || '';
+}
+
+export function setCustomBaseUrl(url: string): void {
+  if (typeof window === 'undefined') return;
+  const trimmed = url.trim().replace(/\/+$/, '');
+  if (trimmed) window.localStorage.setItem(CUSTOM_BASE_STORAGE, trimmed);
+  else window.localStorage.removeItem(CUSTOM_BASE_STORAGE);
+}
+
+export function getCustomKey(): string {
+  if (typeof window === 'undefined') return '';
+  return window.localStorage.getItem(CUSTOM_KEY_STORAGE) || '';
+}
+
+export function setCustomKey(key: string): void {
+  if (typeof window === 'undefined') return;
+  const trimmed = key.trim();
+  if (trimmed) window.localStorage.setItem(CUSTOM_KEY_STORAGE, trimmed);
+  else window.localStorage.removeItem(CUSTOM_KEY_STORAGE);
+}
+
 const GEMINI_KEY_STORAGE = 'slm_gemini_key';
 
 export function getGeminiKey(): string {
