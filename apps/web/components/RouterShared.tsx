@@ -21,20 +21,7 @@ export const download = (name: string, content: string, type: string) => {
   URL.revokeObjectURL(url);
 };
 
-// Starting lineups. Fast holds Gemma by default (the hypothesis under test);
-// the bench's stats can promote it. Custom endpoints have no presets — edit slots.
-type Preset = { budget: RouterSlots; quality: RouterSlots };
-export const PRESETS: Record<'openrouter' | 'gemini', Preset> = {
-  openrouter: {
-    budget: { scout: 'google/gemini-2.5-flash-lite', fast: 'google/gemma-3-27b-it', smart: 'google/gemini-2.5-flash', expert: 'google/gemini-2.5-pro' },
-    quality: { scout: 'google/gemini-2.5-flash-lite', fast: 'google/gemini-2.5-flash-lite', smart: 'google/gemini-2.5-flash', expert: 'google/gemini-2.5-pro' },
-  },
-  gemini: {
-    budget: { scout: 'gemini-2.5-flash-lite', fast: 'gemini-2.0-flash-lite', smart: 'gemini-2.5-flash', expert: 'gemini-2.5-pro' },
-    quality: { scout: 'gemini-2.5-flash-lite', fast: 'gemini-2.5-flash-lite', smart: 'gemini-2.5-flash', expert: 'gemini-2.5-pro' },
-  },
-};
-// Slots start empty — you fill them (type a model, or click a preset button).
+// Slots start empty — you fill each one by typing a model.
 export const DEFAULT_SLOTS: RouterSlots = { scout: '', fast: '', smart: '', expert: '' };
 
 export interface RouterConfigState {
@@ -97,24 +84,12 @@ export function assembleConfig(
 
 // ── Config editor: presets + slots + knobs + batch size ───────────────
 export const SlotsBar: React.FC<{ cfg: RouterConfigState; showBatch?: boolean }> = ({ cfg, showBatch }) => {
-  const { provider } = useProvider();
-  const preset = provider === 'gemini' ? PRESETS.gemini : provider === 'custom' ? null : PRESETS.openrouter;
   const setSlot = (k: keyof RouterSlots, v: string) => cfg.setSlots({ ...cfg.slots, [k]: v });
 
   return (
     <div className="mb-6 rounded-xl border border-studio-border bg-studio-surface p-4">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3">
         <label className="text-xs font-medium text-studio-muted">Model lineup</label>
-        {preset && (
-          <div className="flex gap-1.5">
-            <button onClick={() => cfg.setSlots(preset.budget)} className="rounded-full border border-studio-border px-2.5 py-1 text-[11px] text-studio-text hover:bg-studio-hover">
-              Budget (Gemma)
-            </button>
-            <button onClick={() => cfg.setSlots(preset.quality)} className="rounded-full border border-studio-border px-2.5 py-1 text-[11px] text-studio-text hover:bg-studio-hover">
-              Quality
-            </button>
-          </div>
-        )}
       </div>
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
         {(['scout', 'fast', 'smart', 'expert'] as (keyof RouterSlots)[]).map((k) => (

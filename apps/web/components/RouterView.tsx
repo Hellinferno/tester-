@@ -47,8 +47,6 @@ const RunPanel: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeSwitch }) => 
   const [prompt, setPrompt] = useState('');
   const [images, setImages] = useState<Img[]>([]);
   const [audio, setAudio] = useState<Voice | null>(null);
-  const [runMode, setRunMode] = useState<'auto' | 'mine'>('auto');
-  const [myModel, setMyModel] = useState('');
   const [compare, setCompare] = useState(false);
   const [compareModels, setCompareModels] = useState<string[]>([]);
   const [modelDraft, setModelDraft] = useState('');
@@ -65,13 +63,9 @@ const RunPanel: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeSwitch }) => 
   const audioInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setRunMode(getStored('or.router.runmode', 'auto'));
-    setMyModel(getStored('or.router.mymodel', ''));
     setCompare(getStored('or.router.compare', false));
     setCompareModels(getStored('or.router.comparemodels', []));
   }, []);
-  useEffect(() => setStored('or.router.runmode', runMode), [runMode]);
-  useEffect(() => setStored('or.router.mymodel', myModel), [myModel]);
   useEffect(() => setStored('or.router.compare', compare), [compare]);
   useEffect(() => setStored('or.router.comparemodels', compareModels), [compareModels]);
   useEffect(() => {
@@ -100,10 +94,9 @@ const RunPanel: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeSwitch }) => 
     setError('');
     const notReady = providerNotReady(provider);
     if (notReady) return setError(notReady);
-    if (runMode === 'mine' && !myModel.trim()) return setError('Pick a model for "My choice", or switch to Auto.');
-    // Auto (and the Compare "Auto" column) need all four slots filled.
+    // The router always needs all four slots filled.
     const slotsReady = !!(cfg.slots.scout && cfg.slots.fast && cfg.slots.smart && cfg.slots.expert);
-    if ((compare || runMode === 'auto') && !slotsReady) return setError('Fill in the Scout / Fast / Smart / Expert model slots — or click a preset (Budget / Quality) — before an Auto run.');
+    if (!slotsReady) return setError('Fill in the Scout / Fast / Smart / Expert model slots first.');
     if (!prompt.trim() && !images.length && !audio) return setError('Add a question, image, or voice first.');
 
     stopRef.current = false;
@@ -119,8 +112,7 @@ const RunPanel: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeSwitch }) => 
 
     try {
       if (!compare) {
-        const rc = runMode === 'mine' ? { ...base, forceModel: myModel } : base;
-        const r = await runRouter(rc, m, prompt);
+        const r = await runRouter(base, m, prompt);
         setResult(r);
       } else {
         const columns: ColRun[] = [{ key: 'auto', label: 'Auto (router)', status: 'idle' }, ...compareModels.map((mm) => ({ key: mm, label: mm, status: 'idle' as const }))];
@@ -259,19 +251,9 @@ const RunPanel: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeSwitch }) => 
         </div>
 
         {/* mode row */}
-        <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border border-studio-border bg-studio-surface p-4">
-          <label className="flex items-center gap-1.5 text-sm text-studio-text">
-            <input type="radio" checked={runMode === 'auto'} onChange={() => setRunMode('auto')} className="accent-studio-blue" /> Auto — router decides
-          </label>
-          <label className="flex items-center gap-1.5 text-sm text-studio-text">
-            <input type="radio" checked={runMode === 'mine'} onChange={() => setRunMode('mine')} className="accent-studio-blue" /> My choice
-          </label>
-          {runMode === 'mine' && (
-            <div className="min-w-[240px] flex-1">
-              <ModelInput value={myModel} onChange={setMyModel} placeholder="Pick a model to run…" />
-            </div>
-          )}
-          <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-sm text-studio-text">
+        <div className="mb-6 flex items-center justify-between rounded-xl border border-studio-border bg-studio-surface p-4">
+          <span className="text-sm text-studio-muted">The router picks the model automatically from your lineup.</span>
+          <label className="flex cursor-pointer items-center gap-1.5 text-sm text-studio-text">
             <input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} className="h-4 w-4 accent-studio-blue" /> Compare models
           </label>
         </div>
