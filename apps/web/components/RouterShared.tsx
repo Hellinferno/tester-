@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Wand2 } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { ModelInput } from './ModelInput';
 import { OrModel } from '../lib/openrouter';
 import { getStored, setStored } from '../lib/settings';
@@ -234,13 +234,7 @@ export const StepList: React.FC<{ steps: RouterStep[] }> = ({ steps }) => (
   </div>
 );
 
-// Small shared bits for the compare/scoreboard tables.
+// Badge used for the compare cheapest/fastest tags.
 export const Badge: React.FC<{ children: React.ReactNode; cls?: string }> = ({ children, cls }) => (
   <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] ${cls || 'bg-studio-hover text-studio-muted'}`}>{children}</span>
-);
-
-export const UseAsScoutBtn: React.FC<{ onClick: () => void }> = ({ onClick }) => (
-  <button onClick={onClick} className="inline-flex items-center gap-1 rounded-full border border-studio-border px-2 py-0.5 text-[10px] text-studio-text hover:bg-studio-hover">
-    <Wand2 className="h-3 w-3" /> Use as Scout
-  </button>
 );
