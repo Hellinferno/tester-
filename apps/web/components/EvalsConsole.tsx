@@ -8,6 +8,7 @@ import { fileToAudio, fileToDataURL, modelInputs, OrModel, PipelineResult, prici
 import { getStored, setStored } from '../lib/settings';
 import { activeBaseUrl, activeKey, fetchProviderModels, providerNotReady } from '../lib/providers';
 import { useProvider } from '../lib/providerContext';
+import { runPool } from '../lib/pool';
 
 type EvalImage = { name: string; dataUrl: string };
 type EvalVoice = { name: string; data: string; format: string };
@@ -27,6 +28,7 @@ export const EvalsConsole: React.FC = () => {
   const [timeoutSec, setTimeoutSec] = useState(90);
   const [maxTokens, setMaxTokens] = useState(0);
   const [webSearch, setWebSearch] = useState(false);
+  const [batchSize, setBatchSize] = useState(1);
   const [inputs, setInputs] = useState<EvalInput[]>([]);
   const [results, setResults] = useState<Results>({});
   const [running, setRunning] = useState(false);
@@ -48,6 +50,7 @@ export const EvalsConsole: React.FC = () => {
     setTimeoutSec(getStored('or.eval.timeout', 90));
     setMaxTokens(getStored('or.eval.maxtok', 0));
     setWebSearch(getStored('or.eval.web', false));
+    setBatchSize(getStored('or.eval.batch', 1));
   }, []);
   useEffect(() => {
     fetchProviderModels(provider).then(setModelList);
@@ -57,6 +60,7 @@ export const EvalsConsole: React.FC = () => {
   useEffect(() => setStored('or.eval.timeout', timeoutSec), [timeoutSec]);
   useEffect(() => setStored('or.eval.maxtok', maxTokens), [maxTokens]);
   useEffect(() => setStored('or.eval.web', webSearch), [webSearch]);
+  useEffect(() => setStored('or.eval.batch', batchSize), [batchSize]);
 
   const updateItem = (id: string, patch: Partial<EvalInput>) =>
     setInputs((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
@@ -118,34 +122,34 @@ export const EvalsConsole: React.FC = () => {
     let done = 0;
     let cost = 0;
 
-    outer: for (const input of inputs) {
+    // One task per (input × model); the pool runs `batchSize` at once.
+    const tasks = inputs.flatMap((input) => models.map((model) => ({ input, model })));
+    await runPool(tasks, batchSize, async ({ input, model }) => {
+      if (stopRef.current) return;
       const audioPart = input.voice ? { data: input.voice.data, format: input.voice.format } : undefined;
       const imageUrls = input.images.map((i) => i.dataUrl);
-      for (const model of models) {
-        if (stopRef.current) break outer;
-        setCell(input.id, model, { status: 'running' });
-        setProgress(`${done + 1} / ${total}`);
-        const result = await runPipeline({
-          model,
-          apiKey,
-          provider,
-          baseUrl,
-          temperature,
-          webSearch,
-          prompt: input.prompt,
-          images: imageUrls,
-          audio: audioPart,
-          pricing: pricingFor(modelList, model),
-          maxTokens,
-          signal: controller.signal,
-          timeoutMs,
-        });
-        setCell(input.id, model, { status: result.error ? 'error' : 'done', result });
-        cost += result.totalCost || 0;
-        setTotalCost(cost);
-        done++;
-      }
-    }
+      setCell(input.id, model, { status: 'running' });
+      const result = await runPipeline({
+        model,
+        apiKey,
+        provider,
+        baseUrl,
+        temperature,
+        webSearch,
+        prompt: input.prompt,
+        images: imageUrls,
+        audio: audioPart,
+        pricing: pricingFor(modelList, model),
+        maxTokens,
+        signal: controller.signal,
+        timeoutMs,
+      });
+      setCell(input.id, model, { status: result.error ? 'error' : 'done', result });
+      cost += result.totalCost || 0;
+      setTotalCost(cost);
+      done++;
+      setProgress(`${done} / ${total}`);
+    });
     setRunning(false);
     setProgress('');
   };
@@ -301,6 +305,10 @@ export const EvalsConsole: React.FC = () => {
             <label className="flex cursor-pointer items-center gap-2 text-xs text-studio-muted">
               <input type="checkbox" checked={webSearch} onChange={(e) => setWebSearch(e.target.checked)} className="h-3.5 w-3.5 accent-studio-blue" />
               Web search
+            </label>
+            <label className="flex items-center gap-2 text-xs text-studio-muted" title="How many calls run at once. Higher = faster, but too high can hit provider rate limits (429).">
+              Batch size
+              <input type="number" min={1} max={10} value={batchSize} onChange={(e) => setBatchSize(Math.max(1, Math.min(10, Number(e.target.value))))} className="w-14 rounded-md border border-studio-border bg-white px-2 py-1 text-right text-sm text-studio-text focus:border-studio-blue focus:outline-none" />
             </label>
           </div>
         </div>

@@ -7,6 +7,7 @@ import { STT_INSTRUCTION, OrModel, chat, fileToAudio, pricingFor, usdCost, userM
 import { getStored, setStored } from '../lib/settings';
 import { activeBaseUrl, activeKey, fetchProviderModels, providerNotReady } from '../lib/providers';
 import { useProvider } from '../lib/providerContext';
+import { runPool } from '../lib/pool';
 
 type SttItem = {
   id: string;
@@ -28,6 +29,7 @@ export const SttView: React.FC = () => {
   const [model, setModel] = useState('');
   const [instruction, setInstruction] = useState(STT_INSTRUCTION);
   const [maxTokens, setMaxTokens] = useState(0);
+  const [batchSize, setBatchSize] = useState(1);
   const [items, setItems] = useState<SttItem[]>([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
@@ -40,9 +42,11 @@ export const SttView: React.FC = () => {
   useEffect(() => {
     setModel(getStored('or.stt.model', ''));
     setMaxTokens(getStored('or.stt.maxtok', 0));
+    setBatchSize(getStored('or.stt.batch', 1));
   }, []);
   useEffect(() => setStored('or.stt.model', model), [model]);
   useEffect(() => setStored('or.stt.maxtok', maxTokens), [maxTokens]);
+  useEffect(() => setStored('or.stt.batch', batchSize), [batchSize]);
   useEffect(() => {
     fetchProviderModels(provider).then(setModelList);
   }, [provider]);
@@ -74,8 +78,8 @@ export const SttView: React.FC = () => {
     setRunning(true);
     const pricing = pricingFor(modelList, model);
 
-    for (const item of items) {
-      if (stopRef.current) break;
+    await runPool(items, batchSize, async (item) => {
+      if (stopRef.current) return;
       patch(item.id, { status: 'running', text: undefined, error: undefined });
       const r = await chat({
         model,
@@ -96,7 +100,7 @@ export const SttView: React.FC = () => {
         latencyMs: r.latencyMs,
         cost: pricing ? usdCost(r.usage, pricing) : undefined,
       });
-    }
+    });
     setRunning(false);
   };
 
@@ -152,6 +156,13 @@ export const SttView: React.FC = () => {
                 className="w-full rounded-lg border border-studio-border bg-white px-3 py-2.5 text-sm text-studio-text focus:border-studio-blue focus:outline-none"
               />
             </div>
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <label className="flex items-center gap-2 text-xs text-studio-muted" title="How many audio files run at once. Higher = faster, but too high can hit provider rate limits (429).">
+              Batch size
+              <input type="number" min={1} max={10} value={batchSize} onChange={(e) => setBatchSize(Math.max(1, Math.min(10, Number(e.target.value))))} className="w-16 rounded-md border border-studio-border bg-white px-2 py-1.5 text-right text-sm text-studio-text focus:border-studio-blue focus:outline-none" />
+            </label>
+            <span className="text-[11px] text-studio-faint">Run this many files at once.</span>
           </div>
           <div className="mt-3">
             <label className="mb-1.5 block text-xs font-medium text-studio-muted">Instruction</label>

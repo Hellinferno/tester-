@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { FileText, FlaskConical, MessageSquare, Mic, Sparkles } from 'lucide-react';
+import { FileText, FlaskConical, MessageSquare, Mic, Route, Sparkles } from 'lucide-react';
 import { SettingsPanel } from './SettingsPanel/SettingsPanel';
 
 interface SidebarProps {
@@ -11,6 +11,7 @@ interface SidebarProps {
 
 const NAV = [
   { id: 'chat', label: 'Chat', icon: MessageSquare },
+  { id: 'router', label: 'Router', icon: Route },
   { id: 'ocr', label: 'OCR', icon: FileText },
   { id: 'stt', label: 'STT', icon: Mic },
   { id: 'evals', label: 'Evals', icon: FlaskConical },
