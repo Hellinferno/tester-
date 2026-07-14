@@ -1,8 +1,7 @@
-// The smart router: Check → Analyze → Decide → Answer (+parallel backup) →
-// Verify. Pure orchestration over chat() — no React, unit-testable. Fixes the
-// two weak spots of the Lumos keyword router: it classifies from the actual
-// image (not just text), and it escalates on an INDEPENDENT re-solve rather than
-// the model's own (unreliable) confidence.
+// The smart router: Check → Analyze → Decide → Answer (+parallel backup race).
+// Pure orchestration over chat() — no React, unit-testable. Fixes the Lumos
+// keyword router's blind spot by classifying from the actual image (not just the
+// typed text) before choosing which model answers.
 
 import { chat, ChatMessage, ChatResult, OrModel, pricingFor, Provider, userMessage, usdCost } from './openrouter';
 import { CheckResult, checkImages } from './imageCheck';
@@ -36,7 +35,6 @@ export interface RouterConfig {
   baseUrl?: string;
   slots: RouterSlots;
   budgetSec: number;
-  verify: boolean;
   backup: boolean;
   maxTokens?: number;
   models: OrModel[]; // for pricing (OpenRouter/Gemini); empty on custom
@@ -45,7 +43,7 @@ export interface RouterConfig {
   forceModel?: string; // "My choice" mode — skip Decide, use this model
 }
 
-export type StepRole = 'analyze' | 'answer' | 'backup' | 'verify' | 'resolve';
+export type StepRole = 'analyze' | 'answer' | 'backup';
 
 export interface RouterStep {
   role: StepRole;
@@ -58,18 +56,15 @@ export interface RouterStep {
   text?: string;
 }
 
-export type VerifyVerdict = 'match' | 'mismatch' | 'skipped' | 'unverifiable';
-
 export interface RouterRun {
   retake?: { reason: string; detail: string };
   check?: CheckResult;
   scout?: ScoutResult;
   decision?: { model: string; reason: string; backupModel?: string };
-  answeredModel?: string; // the model whose answer we actually shipped (race winner / re-solve)
+  answeredModel?: string; // the model whose answer we shipped (backup-race winner)
   answer: string;
   finalValue?: string;
   confidence?: number;
-  verify?: VerifyVerdict;
   steps: RouterStep[];
   totalTokens: number;
   totalCost?: number;
@@ -96,15 +91,7 @@ function answerInstruction(prompt: string): string {
   );
 }
 
-function verifyInstruction(prompt: string): string {
-  return (
-    (prompt?.trim() || 'Solve the problem shown in the image.') +
-    '\n\nSolve it INDEPENDENTLY from scratch. Reply with ONLY a JSON object:\n' +
-    '{"final_value":"<ONLY the final answer>","confidence":<0.0-1.0>}'
-  );
-}
-
-// Trivial text-only questions skip Analyze + Verify (cheap stays cheap).
+// Trivial text-only questions skip Analyze (cheap stays cheap).
 const TRIVIAL_RE = /(what is the formula|state the formula|formula for|define\b|definition of|what does .* stand for|si unit of)/i;
 
 // ── json + helpers ────────────────────────────────────────────────────
@@ -133,14 +120,6 @@ function normalizeScout(o: any): ScoutResult {
     type: String(o?.type || 'unknown'),
     needsVision: !!o?.needs_vision,
   };
-}
-
-function normValue(v: string | undefined): string {
-  return String(v || '')
-    .toLowerCase()
-    .replace(/\s+/g, '')
-    .replace(/[$\\]/g, '')
-    .replace(/[.]+$/, '');
 }
 
 const isAbort = (msg?: string) => !!msg && /abort|timed out/i.test(msg);
@@ -231,18 +210,6 @@ function decide(cfg: RouterConfig, scout: ScoutResult): { model: string; reason:
   const borderline = scout.difficulty === 'hard' || scout.difficulty === 'extreme' || (scout.difficulty === 'medium' && scout.logicDepth >= 4);
   const backupModel = cfg.backup && borderline && model !== cfg.slots.expert ? cfg.slots.expert : undefined;
   return { model, reason, backupModel };
-}
-
-function verifierModel(cfg: RouterConfig, answerModel: string): string | null {
-  const costOf = mkCostOf(cfg);
-  const seen = new Set<string>();
-  const candidates = [cfg.slots.fast, cfg.slots.smart, cfg.slots.expert].filter((m) => {
-    if (!m || m === answerModel || seen.has(m)) return false;
-    seen.add(m);
-    return true;
-  });
-  candidates.sort((a, b) => costOf(a) - costOf(b));
-  return candidates[0] || null;
 }
 
 // ── stage 3: answer, with optional parallel backup race ───────────────
@@ -358,49 +325,5 @@ export async function runRouter(cfg: RouterConfig, media: RouterMedia, prompt: s
   run.confidence = numOrUndef(answerEntry.parsed?.confidence);
   run.answeredModel = answerEntry.model;
 
-  // Stage 4 — verify (independent re-solve, value compare) → resolve on mismatch.
-  if (!cfg.verify || trivial) {
-    run.verify = 'skipped';
-    return finish();
-  }
-  const vModel = verifierModel(cfg, answerEntry.model);
-  if (!run.finalValue || !vModel) {
-    run.verify = run.finalValue ? 'skipped' : 'unverifiable';
-    return finish();
-  }
-  const vRes = await callChat(cfg, vModel, [userMessage(verifyInstruction(prompt), effMedia.images, effMedia.audio)]);
-  const vStep = toStep(cfg, 'verify', vModel, vRes);
-  const vParsed = vRes.error ? null : parseJson<{ final_value?: string; confidence?: number }>(vRes.text);
-  if (!vParsed?.final_value) {
-    vStep.note = 'unverifiable';
-    steps.push(vStep);
-    run.verify = 'unverifiable';
-    return finish();
-  }
-  const va = normValue(vParsed.final_value);
-  const vb = normValue(run.finalValue);
-  if (!va || !vb) {
-    // Both values normalized away to nothing (e.g. "$" vs ".") — can't compare.
-    vStep.note = 'unverifiable';
-    steps.push(vStep);
-    run.verify = 'unverifiable';
-    return finish();
-  }
-  const match = va === vb;
-  vStep.note = match ? `match ✓ (${vParsed.final_value})` : `mismatch — got ${vParsed.final_value}`;
-  steps.push(vStep);
-  run.verify = match ? 'match' : 'mismatch';
-
-  if (!match && answerEntry.model !== cfg.slots.expert) {
-    const resolve = await answerOnce(cfg, cfg.slots.expert, 'resolve', effMedia, prompt);
-    resolve.step.note = 'tie-break re-solve';
-    steps.push(resolve.step);
-    run.answeredModel = cfg.slots.expert;
-    if (resolve.parsed) {
-      run.answer = resolve.parsed.answer || run.answer;
-      run.finalValue = resolve.parsed.final_value || run.finalValue;
-      run.confidence = numOrUndef(resolve.parsed.confidence) ?? run.confidence;
-    }
-  }
   return finish();
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, BadgeCheck, Wand2 } from 'lucide-react';
+import { AlertTriangle, Wand2 } from 'lucide-react';
 import { ModelInput } from './ModelInput';
 import { OrModel } from '../lib/openrouter';
 import { getStored, setStored } from '../lib/settings';
@@ -42,8 +42,6 @@ export interface RouterConfigState {
   setSlots: (s: RouterSlots) => void;
   budgetSec: number;
   setBudgetSec: (n: number) => void;
-  verify: boolean;
-  setVerify: (b: boolean) => void;
   backup: boolean;
   setBackup: (b: boolean) => void;
   maxTokens: number;
@@ -55,7 +53,6 @@ export interface RouterConfigState {
 export function useRouterConfig(): RouterConfigState {
   const [slots, setSlots] = useState<RouterSlots>(DEFAULT_SLOTS);
   const [budgetSec, setBudgetSec] = useState(10);
-  const [verify, setVerify] = useState(true);
   const [backup, setBackup] = useState(true);
   const [maxTokens, setMaxTokens] = useState(0);
   const [batchSize, setBatchSize] = useState(1);
@@ -63,19 +60,17 @@ export function useRouterConfig(): RouterConfigState {
   useEffect(() => {
     setSlots(getStored('or.router.slots', DEFAULT_SLOTS));
     setBudgetSec(getStored('or.router.budget', 10));
-    setVerify(getStored('or.router.verify', true));
     setBackup(getStored('or.router.backup', true));
     setMaxTokens(getStored('or.router.maxtok', 0));
     setBatchSize(getStored('or.router.batch', 1));
   }, []);
   useEffect(() => setStored('or.router.slots', slots), [slots]);
   useEffect(() => setStored('or.router.budget', budgetSec), [budgetSec]);
-  useEffect(() => setStored('or.router.verify', verify), [verify]);
   useEffect(() => setStored('or.router.backup', backup), [backup]);
   useEffect(() => setStored('or.router.maxtok', maxTokens), [maxTokens]);
   useEffect(() => setStored('or.router.batch', batchSize), [batchSize]);
 
-  return { slots, setSlots, budgetSec, setBudgetSec, verify, setVerify, backup, setBackup, maxTokens, setMaxTokens, batchSize, setBatchSize };
+  return { slots, setSlots, budgetSec, setBudgetSec, backup, setBackup, maxTokens, setMaxTokens, batchSize, setBatchSize };
 }
 
 /** Assemble the run-time RouterConfig (key/baseUrl/models pulled fresh). Per-call
@@ -92,7 +87,6 @@ export function assembleConfig(
     baseUrl: activeBaseUrl(provider),
     slots: cfg.slots,
     budgetSec: cfg.budgetSec,
-    verify: cfg.verify,
     backup: cfg.backup,
     maxTokens: cfg.maxTokens,
     models,
@@ -139,10 +133,6 @@ export const SlotsBar: React.FC<{ cfg: RouterConfigState; showBatch?: boolean }>
           <input type="number" min={1} value={cfg.budgetSec} onChange={(e) => cfg.setBudgetSec(Math.max(1, Number(e.target.value)))} className="w-16 rounded-lg border border-studio-border bg-white px-2 py-1.5 text-sm text-studio-text focus:border-studio-blue focus:outline-none" />
         </label>
         <label className="flex cursor-pointer items-center gap-1.5 text-xs text-studio-muted">
-          <input type="checkbox" checked={cfg.verify} onChange={(e) => cfg.setVerify(e.target.checked)} className="h-3.5 w-3.5 accent-studio-blue" />
-          Verify answer
-        </label>
-        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-studio-muted">
           <input type="checkbox" checked={cfg.backup} onChange={(e) => cfg.setBackup(e.target.checked)} className="h-3.5 w-3.5 accent-studio-blue" />
           Backup race (hard)
         </label>
@@ -175,13 +165,6 @@ const DIFF_COLOR: Record<string, string> = {
   medium: 'bg-sky-100 text-sky-700',
   hard: 'bg-amber-100 text-amber-700',
   extreme: 'bg-red-100 text-red-700',
-};
-
-const VERIFY_BADGE: Record<string, { cls: string; label: string }> = {
-  match: { cls: 'bg-emerald-100 text-emerald-700', label: 'verified ✓' },
-  mismatch: { cls: 'bg-red-100 text-red-700', label: 'mismatch' },
-  skipped: { cls: 'bg-studio-hover text-studio-muted', label: 'verify off' },
-  unverifiable: { cls: 'bg-studio-hover text-studio-muted', label: 'unverifiable' },
 };
 
 export const RouterRunCard: React.FC<{ run: RouterRun; budgetSec: number }> = ({ run, budgetSec }) => {
@@ -232,7 +215,6 @@ export const RouterRunCard: React.FC<{ run: RouterRun; budgetSec: number }> = ({
       <div className="rounded-lg border border-studio-border bg-white p-3">
         <div className="mb-1 flex items-center gap-2">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-studio-muted">Answer</span>
-          {run.verify && <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${VERIFY_BADGE[run.verify].cls}`}>{VERIFY_BADGE[run.verify].label}</span>}
           {typeof run.confidence === 'number' && <span className="text-[10px] text-studio-faint">conf {run.confidence.toFixed(2)}</span>}
         </div>
         <div className="max-h-72 overflow-y-auto whitespace-pre-wrap text-[13px] leading-6 text-studio-text">
@@ -259,7 +241,7 @@ export const RouterRunCard: React.FC<{ run: RouterRun; budgetSec: number }> = ({
   );
 };
 
-const ROLE_LABEL: Record<string, string> = { analyze: 'analyze', answer: 'answer', backup: 'backup', verify: 'verify', resolve: 're-solve' };
+const ROLE_LABEL: Record<string, string> = { analyze: 'analyze', answer: 'answer', backup: 'backup' };
 
 export const StepList: React.FC<{ steps: RouterStep[] }> = ({ steps }) => (
   <div className="space-y-1">
@@ -281,13 +263,6 @@ export const StepList: React.FC<{ steps: RouterStep[] }> = ({ steps }) => (
 export const Badge: React.FC<{ children: React.ReactNode; cls?: string }> = ({ children, cls }) => (
   <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] ${cls || 'bg-studio-hover text-studio-muted'}`}>{children}</span>
 );
-
-export const VerifiedTick: React.FC<{ on: boolean }> = ({ on }) =>
-  on ? (
-    <span className="inline-flex items-center gap-1 text-emerald-600">
-      <BadgeCheck className="h-3.5 w-3.5" />
-    </span>
-  ) : null;
 
 export const UseAsScoutBtn: React.FC<{ onClick: () => void }> = ({ onClick }) => (
   <button onClick={onClick} className="inline-flex items-center gap-1 rounded-full border border-studio-border px-2 py-0.5 text-[10px] text-studio-text hover:bg-studio-hover">

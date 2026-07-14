@@ -11,7 +11,7 @@ import { useProvider } from '../lib/providerContext';
 import { runRouter, RouterRun } from '../lib/router';
 import { recordRun } from '../lib/routerStats';
 import { runPool } from '../lib/pool';
-import { assembleConfig, Badge, download, fmtUsd, RouterRunCard, SlotsBar, useRouterConfig, VerifiedTick } from './RouterShared';
+import { assembleConfig, Badge, download, fmtUsd, RouterRunCard, SlotsBar, useRouterConfig } from './RouterShared';
 
 type Img = { name: string; dataUrl: string };
 type Voice = { name: string; data: string; format: string };
@@ -151,8 +151,8 @@ const RunPanel: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeSwitch }) => 
     let any = false;
     for (const c of cols) {
       if (c.status !== 'done' || !c.run) continue;
-      // Credit the model that actually produced the shipped answer (race winner /
-      // re-solve), not the tier the router first picked.
+      // Credit the model that actually produced the shipped answer (backup-race
+      // winner), not the tier the router first picked.
       const model = c.key === 'auto' ? c.run.answeredModel || c.run.decision?.model : c.key;
       if (!model) continue;
       recordRun(model, scout.subject, scout.difficulty, { win: c.key === key, ms: c.run.totalTimeMs, cost: c.run.totalCost || 0 });
@@ -163,13 +163,13 @@ const RunPanel: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeSwitch }) => 
 
   const exportRows = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['column', 'model', 'subject', 'difficulty', 'final_value', 'verified', 'tokens', 'ms', 'cost_usd', 'answer'];
+    const header = ['column', 'model', 'subject', 'difficulty', 'final_value', 'tokens', 'ms', 'cost_usd', 'answer'];
     const rows = [header.map(esc).join(',')];
     const src = compare ? cols : result ? [{ key: 'single', label: 'result', status: 'done', run: result } as ColRun] : [];
     for (const c of src) {
       const r = c.run;
       rows.push(
-        [c.label, c.key === 'auto' ? r?.decision?.model || 'auto' : c.key, r?.scout?.subject || '', r?.scout?.difficulty || '', r?.finalValue || '', r?.verify || '', r?.totalTokens ?? '', r?.totalTimeMs ?? '', r?.totalCost ?? '', r?.answer || '']
+        [c.label, c.key === 'auto' ? r?.decision?.model || 'auto' : c.key, r?.scout?.subject || '', r?.scout?.difficulty || '', r?.finalValue || '', r?.totalTokens ?? '', r?.totalTimeMs ?? '', r?.totalCost ?? '', r?.answer || '']
           .map(esc)
           .join(','),
       );
@@ -325,7 +325,6 @@ const RunPanel: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeSwitch }) => 
                             <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                               {r.scout && <span className="rounded-full bg-studio-bluesoft px-1.5 py-0.5 text-studio-bluetext">{r.scout.subject}</span>}
                               {r.scout && <span className="rounded-full bg-studio-hover px-1.5 py-0.5 text-studio-muted">{r.scout.difficulty}</span>}
-                              <VerifiedTick on={r.verify === 'match'} />
                             </div>
                             <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-[12px] leading-5 text-studio-text">{r.answer || <span className="text-studio-faint">(no answer)</span>}</div>
                             {r.finalValue && <div className="text-[12px] font-medium">→ {r.finalValue}</div>}
