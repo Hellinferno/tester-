@@ -101,6 +101,9 @@ const RunPanel: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeSwitch }) => 
     const notReady = providerNotReady(provider);
     if (notReady) return setError(notReady);
     if (runMode === 'mine' && !myModel.trim()) return setError('Pick a model for "My choice", or switch to Auto.');
+    // Auto (and the Compare "Auto" column) need all four slots filled.
+    const slotsReady = !!(cfg.slots.scout && cfg.slots.fast && cfg.slots.smart && cfg.slots.expert);
+    if ((compare || runMode === 'auto') && !slotsReady) return setError('Fill in the Scout / Fast / Smart / Expert model slots — or click a preset (Budget / Quality) — before an Auto run.');
     if (!prompt.trim() && !images.length && !audio) return setError('Add a question, image, or voice first.');
 
     stopRef.current = false;

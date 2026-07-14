@@ -34,7 +34,8 @@ export const PRESETS: Record<'openrouter' | 'gemini', Preset> = {
     quality: { scout: 'gemini-2.5-flash-lite', fast: 'gemini-2.5-flash-lite', smart: 'gemini-2.5-flash', expert: 'gemini-2.5-pro' },
   },
 };
-export const DEFAULT_SLOTS: RouterSlots = PRESETS.openrouter.budget;
+// Slots start empty — you fill them (type a model, or click a preset button).
+export const DEFAULT_SLOTS: RouterSlots = { scout: '', fast: '', smart: '', expert: '' };
 
 export interface RouterConfigState {
   slots: RouterSlots;
