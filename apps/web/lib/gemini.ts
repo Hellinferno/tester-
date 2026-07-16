@@ -42,6 +42,8 @@ function buildGeminiBody(opts: ChatOptions) {
   const gc: Record<string, unknown> = {};
   if (opts.temperature != null) gc.temperature = opts.temperature;
   if (opts.maxTokens && opts.maxTokens > 0) gc.maxOutputTokens = opts.maxTokens;
+  // Only send when > 0 — 0 is illegal on gemini-2.5-pro (can't disable thinking).
+  if (opts.thinkingBudget && opts.thinkingBudget > 0) gc.thinkingConfig = { thinkingBudget: Math.floor(opts.thinkingBudget) };
   if (Object.keys(gc).length) body.generationConfig = gc;
   if (opts.webSearch) body.tools = [{ google_search: {} }];
   return body;
@@ -49,7 +51,12 @@ function buildGeminiBody(opts: ChatOptions) {
 
 function geminiUsage(u: any): Usage | undefined {
   if (!u) return undefined;
-  return { prompt_tokens: u.promptTokenCount, completion_tokens: u.candidatesTokenCount, total_tokens: u.totalTokenCount };
+  return {
+    prompt_tokens: u.promptTokenCount,
+    completion_tokens: u.candidatesTokenCount,
+    total_tokens: u.totalTokenCount,
+    reasoning_tokens: u.thoughtsTokenCount,
+  };
 }
 
 export async function geminiChat(opts: ChatOptions): Promise<ChatResult> {

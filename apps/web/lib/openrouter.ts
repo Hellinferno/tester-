@@ -23,6 +23,7 @@ export interface Usage {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
+  reasoning_tokens?: number;
 }
 
 export interface ChatOptions {
@@ -34,6 +35,7 @@ export interface ChatOptions {
   temperature?: number;
   webSearch?: boolean;
   maxTokens?: number;
+  thinkingBudget?: number; // reasoning token budget; 0/undefined = model default
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -61,7 +63,20 @@ function requestBody(opts: ChatOptions, stream: boolean) {
   };
   // The web-search plugin is OpenRouter-only — don't send it to custom endpoints.
   if (opts.webSearch && opts.provider !== 'custom') body.plugins = [{ id: 'web' }];
-  if (opts.maxTokens && opts.maxTokens > 0) body.max_tokens = opts.maxTokens;
+
+  // Thinking budget → OpenRouter's top-level `reasoning` object. Not for custom
+  // endpoints (strict servers may reject the unknown key); non-reasoning models
+  // silently ignore it.
+  const budget = opts.thinkingBudget && opts.thinkingBudget > 0 ? Math.floor(opts.thinkingBudget) : 0;
+  if (budget > 0 && opts.provider !== 'custom') body.reasoning = { max_tokens: budget };
+
+  // Anthropic requires the request's max_tokens to EXCEED the reasoning budget,
+  // so give the visible answer headroom above it. Other models stay uncapped
+  // unless the caller set an explicit maxTokens.
+  let maxTok = opts.maxTokens && opts.maxTokens > 0 ? opts.maxTokens : 0;
+  if (budget > 0 && /anthropic\/|claude/i.test(opts.model) && maxTok <= budget) maxTok = budget + 4096;
+  if (maxTok > 0) body.max_tokens = maxTok;
+
   if (stream) body.stream_options = { include_usage: true };
   return body;
 }
@@ -94,7 +109,10 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
       return { text: '', latencyMs, error: `HTTP ${res.status}: ${errorDetail(detail)}` };
     }
     const json = await res.json();
-    return { text: json.choices?.[0]?.message?.content ?? '', usage: json.usage, latencyMs };
+    const usage: Usage | undefined = json.usage
+      ? { ...json.usage, reasoning_tokens: json.usage.completion_tokens_details?.reasoning_tokens }
+      : undefined;
+    return { text: json.choices?.[0]?.message?.content ?? '', usage, latencyMs };
   } catch (e: any) {
     return { text: '', latencyMs: Date.now() - start, error: abortMessage(e) || String(e) };
   } finally {

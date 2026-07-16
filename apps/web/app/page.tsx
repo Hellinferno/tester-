@@ -7,6 +7,7 @@ import { EvalsConsole } from '../components/EvalsConsole';
 import { OcrView } from '../components/OcrView';
 import { SttView } from '../components/SttView';
 import { RouterView } from '../components/RouterView';
+import { PromptTesterView } from '../components/PromptTesterView';
 import { ProviderProvider } from '../lib/providerContext';
 
 export default function StudioPage() {
@@ -22,6 +23,7 @@ export default function StudioPage() {
           {activeTab === 'ocr' && <OcrView />}
           {activeTab === 'stt' && <SttView />}
           {activeTab === 'evals' && <EvalsConsole />}
+          {activeTab === 'prompttester' && <PromptTesterView />}
         </main>
       </div>
     </ProviderProvider>

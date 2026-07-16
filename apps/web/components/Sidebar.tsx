@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { FileText, FlaskConical, MessageSquare, Mic, Route, Sparkles } from 'lucide-react';
+import { Columns3, FileText, FlaskConical, MessageSquare, Mic, Route, Sparkles } from 'lucide-react';
 import { SettingsPanel } from './SettingsPanel/SettingsPanel';
 
 interface SidebarProps {
@@ -15,6 +15,7 @@ const NAV = [
   { id: 'ocr', label: 'OCR', icon: FileText },
   { id: 'stt', label: 'STT', icon: Mic },
   { id: 'evals', label: 'Evals', icon: FlaskConical },
+  { id: 'prompttester', label: 'Prompt tester', icon: Columns3 },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
