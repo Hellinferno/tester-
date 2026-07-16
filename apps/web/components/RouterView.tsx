@@ -32,7 +32,7 @@ export const RouterView: React.FC = () => {
           onClick={() => switchMode(m)}
           className={`rounded-md px-3 py-1 text-xs transition-colors ${mode === m ? 'bg-studio-bluesoft font-medium text-studio-bluetext' : 'text-studio-muted hover:bg-studio-hover'}`}
         >
-          {m === 'single' ? 'Single' : 'Dataset'}
+          {m === 'single' ? 'Single' : 'Bulk'}
         </button>
       ))}
     </div>

@@ -1,32 +1,29 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Download, Loader2, Mic, Play, Plus, Square, Upload, X } from 'lucide-react';
-import { ModelInput } from './ModelInput';
+import { Loader2, Mic, Play, Plus, Square, Upload, X } from 'lucide-react';
 import { fileToAudio, fileToDataURL, OrModel } from '../lib/openrouter';
-import { getStored, setStored } from '../lib/settings';
 import { fetchProviderModels, providerNotReady } from '../lib/providers';
 import { useProvider } from '../lib/providerContext';
 import { runRouter, RouterRun } from '../lib/router';
 import { runPool } from '../lib/pool';
-import { assembleConfig, Badge, download, fmtUsd, SlotsBar, useRouterConfig } from './RouterShared';
+import { assembleConfig, download, fmtUsd, RouterRunCard, SlotsBar, useRouterConfig } from './RouterShared';
 
 type Img = { name: string; dataUrl: string };
 type Voice = { name: string; data: string; format: string };
 type Item = { id: string; images: Img[]; voice: Voice | null; prompt: string };
 type Cell = { status: 'idle' | 'running' | 'done' | 'error'; run?: RouterRun };
-type Results = Record<string, Record<string, Cell>>;
 
 let idSeq = 0;
-const AUTO = 'auto';
 
+// Bulk mode: run the router (Auto) over a whole dataset — same functioning as
+// Single mode, one full result card per item. Build items by hand or import a
+// folder (pairs image i with voice i by sorted filename).
 export const RouterDataset: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeSwitch }) => {
   const { provider } = useProvider();
   const cfg = useRouterConfig();
   const [dataset, setDataset] = useState<Item[]>([]);
-  const [compareModels, setCompareModels] = useState<string[]>([]);
-  const [modelDraft, setModelDraft] = useState('');
-  const [results, setResults] = useState<Results>({});
+  const [results, setResults] = useState<Record<string, Cell>>({});
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
@@ -38,14 +35,10 @@ export const RouterDataset: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeS
   const folderInput = useRef<HTMLInputElement>(null);
   const targetItem = useRef<string>('');
 
-  useEffect(() => setCompareModels(getStored('or.routerds.models', [])), []);
-  useEffect(() => setStored('or.routerds.models', compareModels), [compareModels]);
   useEffect(() => {
     fetchProviderModels(provider).then(setModelList);
   }, [provider]);
   useEffect(() => () => abortRef.current?.abort(), []);
-
-  const cols = [AUTO, ...compareModels];
 
   const updateItem = (id: string, patch: Partial<Item>) => setDataset((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
   const addBlank = () => setDataset((prev) => [...prev, { id: `rd-${++idSeq}`, images: [], voice: null, prompt: '' }]);
@@ -89,12 +82,7 @@ export const RouterDataset: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeS
     setError('');
   };
 
-  const addModel = () => {
-    const m = modelDraft.trim();
-    if (m && !compareModels.includes(m)) setCompareModels([...compareModels, m]);
-    setModelDraft('');
-  };
-  const setCell = (itemId: string, col: string, cell: Cell) => setResults((prev) => ({ ...prev, [itemId]: { ...prev[itemId], [col]: cell } }));
+  const setCell = (itemId: string, cell: Cell) => setResults((prev) => ({ ...prev, [itemId]: cell }));
 
   const run = async () => {
     setError('');
@@ -110,17 +98,15 @@ export const RouterDataset: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeS
     setRunning(true);
     setResults({});
     const base = assembleConfig(provider, cfg, modelList, controller.signal);
-    const tasks = dataset.flatMap((it) => cols.map((col) => ({ it, col })));
-    const total = tasks.length;
+    const total = dataset.length;
     let done = 0;
-    await runPool(tasks, cfg.batchSize, async ({ it, col }) => {
+    await runPool(dataset, cfg.batchSize, async (it) => {
       if (stopRef.current) return;
-      setCell(it.id, col, { status: 'running' });
+      setCell(it.id, { status: 'running' });
       const media = { images: it.images.map((i) => i.dataUrl), audio: it.voice ? { data: it.voice.data, format: it.voice.format } : undefined };
-      const rc = col === AUTO ? base : { ...base, forceModel: col };
-      const r = await runRouter(rc, media, it.prompt);
+      const r = await runRouter(base, media, it.prompt);
       const aborted = controller.signal.aborted;
-      setCell(it.id, col, { status: r.error || aborted ? 'error' : 'done', run: r });
+      setCell(it.id, { status: r.error || aborted ? 'error' : 'done', run: r });
       done++;
       setProgress(`${done} / ${total}`);
     });
@@ -128,32 +114,19 @@ export const RouterDataset: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeS
     setProgress('');
   };
 
-  const badgesFor = (itemId: string) => {
-    const doneCols = cols.filter((col) => {
-      const c = results[itemId]?.[col];
-      return c?.status === 'done' && c.run && !c.run.retake;
-    });
-    const cost = (col: string) => results[itemId][col].run!.totalCost;
-    const ms = (col: string) => results[itemId][col].run!.totalTimeMs;
-    const costed = doneCols.filter((col) => cost(col) != null);
-    const cheapest = costed.length ? costed.reduce((a, b) => (cost(a)! <= cost(b)! ? a : b)) : '';
-    const fastest = doneCols.length ? doneCols.reduce((a, b) => (ms(a) <= ms(b) ? a : b)) : '';
-    return { cheapest, fastest };
-  };
-
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['item', 'column', 'model', 'subject', 'difficulty', 'final_value', 'tokens', 'ms', 'cost_usd', 'answer'];
+    const header = ['item', 'model', 'subject', 'difficulty', 'final_value', 'tokens', 'ms', 'cost_usd', 'answer'];
     const rows = [header.map(esc).join(',')];
     dataset.forEach((it, i) => {
-      cols.forEach((col) => {
-        const r = results[it.id]?.[col]?.run;
-        const model = col === AUTO ? r?.answeredModel || r?.decision?.model || 'auto' : col;
-        rows.push([i + 1, col === AUTO ? 'auto' : 'model', model, r?.scout?.subject || '', r?.scout?.difficulty || '', r?.finalValue || '', r?.totalTokens ?? '', r?.totalTimeMs ?? '', r?.totalCost ?? '', r?.answer || ''].map(esc).join(','));
-      });
+      const r = results[it.id]?.run;
+      const model = r?.answeredModel || r?.decision?.model || '';
+      rows.push([i + 1, model, r?.scout?.subject || '', r?.scout?.difficulty || '', r?.finalValue || '', r?.totalTokens ?? '', r?.totalTimeMs ?? '', r?.totalCost ?? '', r?.answer || ''].map(esc).join(','));
     });
-    download('router-dataset.csv', rows.join('\n'), 'text/csv;charset=utf-8');
+    download('router-bulk.csv', rows.join('\n'), 'text/csv;charset=utf-8');
   };
+
+  const totalCost = dataset.reduce((s, it) => s + (results[it.id]?.run?.totalCost || 0), 0);
 
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-studio-canvas">
@@ -163,10 +136,11 @@ export const RouterDataset: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeS
           {modeSwitch}
         </div>
         <div className="flex items-center gap-2">
+          {totalCost > 0 && <span className="font-mono text-xs text-studio-muted">est. {fmtUsd(totalCost)}</span>}
           {progress && <span className="text-xs text-studio-muted">{progress}</span>}
           {dataset.length > 0 && (
             <button onClick={exportCsv} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
-              <Download className="h-3.5 w-3.5" /> CSV
+              CSV
             </button>
           )}
           {running ? (
@@ -186,32 +160,9 @@ export const RouterDataset: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeS
 
         <SlotsBar cfg={cfg} showBatch />
 
-        {/* compare models */}
-        <div className="mb-4 rounded-xl border border-studio-border bg-studio-surface p-4">
-          <label className="mb-1.5 block text-xs font-medium text-studio-muted">Also compare Auto against these models (optional)</label>
-          <div className="mb-2 flex flex-wrap gap-2">
-            {compareModels.map((m) => (
-              <span key={m} className="flex items-center gap-1.5 rounded-full bg-studio-bluesoft px-3 py-1 text-xs text-studio-bluetext">
-                {m}
-                <button onClick={() => setCompareModels(compareModels.filter((x) => x !== m))}>
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-          <div className="flex items-start gap-2">
-            <div className="flex-1">
-              <ModelInput value={modelDraft} onChange={setModelDraft} onEnter={addModel} placeholder="Add a model to compare…" />
-            </div>
-            <button onClick={addModel} className="flex items-center gap-1 rounded-lg bg-studio-blue px-3 py-2.5 text-sm text-white hover:bg-studio-bluehover">
-              <Plus className="h-4 w-4" /> Add
-            </button>
-          </div>
-        </div>
-
         {/* dataset toolbar */}
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-xs font-medium text-studio-muted">Dataset — items ({dataset.length})</h3>
+          <h3 className="text-xs font-medium text-studio-muted">Items ({dataset.length})</h3>
           <div className="flex gap-2">
             <button onClick={addBlank} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
               <Plus className="h-3.5 w-3.5" /> Add item
@@ -224,12 +175,12 @@ export const RouterDataset: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeS
 
         {dataset.length === 0 ? (
           <div className="rounded-xl border border-dashed border-studio-border py-12 text-center text-sm text-studio-faint">
-            Add items (image / text / voice), or import a folder. Each item runs through Auto (+ any models above), side by side.
+            Add items (image / text / voice), or import a folder. Each item runs through the router (Auto) and shows its full result.
           </div>
         ) : (
           <div className="space-y-4">
             {dataset.map((it, idx) => {
-              const badges = badgesFor(it.id);
+              const cell = results[it.id];
               return (
                 <div key={it.id} className="rounded-xl border border-studio-border bg-white p-3">
                   <div className="mb-2 flex items-center justify-between">
@@ -273,40 +224,16 @@ export const RouterDataset: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeS
                     className="w-full resize-none rounded-lg border border-studio-border bg-white px-3 py-2 text-sm text-studio-text placeholder-studio-faint focus:border-studio-blue focus:outline-none"
                   />
 
-                  <div className="mt-3 grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(cols.length, 4)}, minmax(0, 1fr))` }}>
-                    {cols.map((col) => {
-                      const cell = results[it.id]?.[col];
-                      const r = cell?.run;
-                      const isAuto = col === AUTO;
-                      const modelShown = isAuto ? r?.answeredModel || r?.decision?.model : col;
-                      return (
-                        <div key={col} className="rounded-lg border border-studio-line bg-studio-surface p-2 text-[11px]">
-                          <div className="mb-1 flex items-center gap-1.5">
-                            <span className="min-w-0 flex-1 truncate font-medium text-studio-text">{isAuto ? 'Auto (router)' : col}</span>
-                            {cell?.status === 'running' && <Loader2 className="h-3 w-3 animate-spin text-studio-blue" />}
-                          </div>
-                          {!cell && <span className="text-studio-faint">—</span>}
-                          {cell?.status === 'running' && <span className="text-studio-faint">running…</span>}
-                          {r?.retake && <span className="text-amber-700">retake: {r.retake.reason}</span>}
-                          {r && !r.retake && (
-                            <div className="space-y-1">
-                              {isAuto && modelShown && <div className="truncate font-mono text-studio-faint">→ {modelShown}</div>}
-                              {r.scout && <div className="text-studio-faint">{r.scout.subject} · {r.scout.difficulty}</div>}
-                              <div className="max-h-32 overflow-y-auto whitespace-pre-wrap leading-5 text-studio-text">{r.answer || <span className="text-studio-faint">(no answer)</span>}</div>
-                              {r.finalValue && <div className="font-medium">→ {r.finalValue}</div>}
-                              <div className="flex flex-wrap gap-1">
-                                {col === badges.cheapest && <Badge cls="bg-emerald-100 text-emerald-700">🏆 cheapest</Badge>}
-                                {col === badges.fastest && <Badge cls="bg-sky-100 text-sky-700">⚡ fastest</Badge>}
-                              </div>
-                              <div className="font-mono text-studio-faint">
-                                {r.totalTokens} tok · {r.totalTimeMs} ms{r.totalCost != null ? ` · ${fmtUsd(r.totalCost)}` : ''}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {cell?.status === 'running' && (
+                    <div className="mt-3 flex items-center gap-2 text-xs text-studio-muted">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Running the router…
+                    </div>
+                  )}
+                  {cell?.run && (
+                    <div className="mt-3 border-t border-studio-line pt-3">
+                      <RouterRunCard run={cell.run} budgetSec={cfg.budgetSec} />
+                    </div>
+                  )}
                 </div>
               );
             })}
