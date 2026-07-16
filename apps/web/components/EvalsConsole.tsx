@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, Download, FolderOpen, ImageIcon, Loader2, Mic, Play, Plus, Square, Upload, X } from 'lucide-react';
+import { AlertTriangle, Check, Download, ImageIcon, Loader2, Mic, Play, Plus, Square, Upload, X } from 'lucide-react';
 import { ModelInput } from './ModelInput';
 import { StageBlock } from './StageBlock';
 import { fileToAudio, fileToDataURL, modelInputs, OrModel, PipelineResult, pricingFor, runPipeline } from '../lib/openrouter';
@@ -40,7 +40,6 @@ export const EvalsConsole: React.FC = () => {
   const abortRef = useRef<AbortController | null>(null);
   const itemImageInput = useRef<HTMLInputElement>(null);
   const itemVoiceInput = useRef<HTMLInputElement>(null);
-  const datasetInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const targetItem = useRef<string>('');
 
@@ -185,30 +184,6 @@ export const EvalsConsole: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const loadDataset = async (file: File | null) => {
-    if (!file) return;
-    try {
-      const data = JSON.parse(await file.text());
-      if (Array.isArray(data.models)) setModels(data.models);
-      if (typeof data.temperature === 'number') setTemperature(data.temperature);
-      if (typeof data.timeoutSec === 'number') setTimeoutSec(data.timeoutSec);
-      if (typeof data.webSearch === 'boolean') setWebSearch(data.webSearch);
-      if (Array.isArray(data.inputs)) {
-        setInputs(
-          data.inputs.map((it: EvalInput) => ({
-            id: `in-${++idSeq}`,
-            images: it.images || [],
-            voice: it.voice || null,
-            prompt: it.prompt || '',
-          })),
-        );
-        setResults({});
-      }
-    } catch (e) {
-      setError('Could not read that dataset file.');
-    }
-  };
-
   const exportJson = () => {
     const payload = inputs.map((inp) => ({
       images: inp.images.map((i) => i.name),
@@ -338,9 +313,6 @@ export const EvalsConsole: React.FC = () => {
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-xs font-medium text-studio-muted">Dataset — inputs ({inputs.length})</h3>
           <div className="flex gap-2">
-            <button onClick={() => datasetInput.current?.click()} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
-              <FolderOpen className="h-3.5 w-3.5" /> Load
-            </button>
             <button onClick={addBlankInput} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
               <Plus className="h-3.5 w-3.5" /> Add input
             </button>
@@ -352,7 +324,7 @@ export const EvalsConsole: React.FC = () => {
 
         {inputs.length === 0 ? (
           <div className="rounded-xl border border-dashed border-studio-border py-12 text-center text-sm text-studio-faint">
-            Each input can be image(s), text, voice, or all. Add inputs (or Load a saved dataset), pick models, then Run all.
+            Each input can be image(s), text, voice, or all. Add inputs (or import a Folder), pick models, then Run all.
           </div>
         ) : (
           <div className="space-y-4">
@@ -453,7 +425,6 @@ export const EvalsConsole: React.FC = () => {
       {/* hidden inputs */}
       <input ref={itemImageInput} type="file" accept="image/*" multiple hidden onChange={(e) => { addImagesToTarget(e.target.files); e.currentTarget.value = ''; }} />
       <input ref={itemVoiceInput} type="file" accept="audio/*" hidden onChange={(e) => { setVoiceForTarget(e.target.files?.[0] || null); e.currentTarget.value = ''; }} />
-      <input ref={datasetInput} type="file" accept="application/json,.json" hidden onChange={(e) => { loadDataset(e.target.files?.[0] || null); e.currentTarget.value = ''; }} />
       <input ref={folderInput} type="file" multiple hidden {...({ webkitdirectory: '', directory: '' } as Record<string, string>)} onChange={(e) => { addFolder(e.target.files); e.currentTarget.value = ''; }} />
     </section>
   );
