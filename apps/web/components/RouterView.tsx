@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Download, ImageIcon, Loader2, Mic, Play, Plus, Sparkles, Square, X } from 'lucide-react';
 import { ModelInput } from './ModelInput';
+import { RouterDataset } from './RouterDataset';
 import { fileToAudio, fileToDataURL, OrModel } from '../lib/openrouter';
 import { getStored, setStored } from '../lib/settings';
 import { fetchProviderModels, providerNotReady } from '../lib/providers';
@@ -16,9 +17,30 @@ type Img = { name: string; dataUrl: string };
 type Voice = { name: string; data: string; format: string };
 type ColRun = { key: string; label: string; status: 'idle' | 'running' | 'done' | 'error'; run?: RouterRun };
 
-export const RouterView: React.FC = () => <RunPanel />;
+export const RouterView: React.FC = () => {
+  const [mode, setMode] = useState<'single' | 'dataset'>('single');
+  useEffect(() => setMode(getStored('or.router.mode2', 'single')), []);
+  const switchMode = (m: 'single' | 'dataset') => {
+    setMode(m);
+    setStored('or.router.mode2', m);
+  };
+  const modeSwitch = (
+    <div className="flex gap-1 rounded-lg border border-studio-border p-0.5">
+      {(['single', 'dataset'] as const).map((m) => (
+        <button
+          key={m}
+          onClick={() => switchMode(m)}
+          className={`rounded-md px-3 py-1 text-xs transition-colors ${mode === m ? 'bg-studio-bluesoft font-medium text-studio-bluetext' : 'text-studio-muted hover:bg-studio-hover'}`}
+        >
+          {m === 'single' ? 'Single' : 'Dataset'}
+        </button>
+      ))}
+    </div>
+  );
+  return mode === 'single' ? <RunPanel modeSwitch={modeSwitch} /> : <RouterDataset modeSwitch={modeSwitch} />;
+};
 
-const RunPanel: React.FC = () => {
+const RunPanel: React.FC<{ modeSwitch: React.ReactNode }> = ({ modeSwitch }) => {
   const { provider } = useProvider();
   const cfg = useRouterConfig();
   const [prompt, setPrompt] = useState('');
@@ -155,7 +177,10 @@ const RunPanel: React.FC = () => {
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-studio-canvas">
       <header className="flex items-center justify-between border-b border-studio-line px-6 py-[13px]">
-        <div className="font-display text-[15px] font-medium">Router</div>
+        <div className="flex items-center gap-3">
+          <div className="font-display text-[15px] font-medium">Router</div>
+          {modeSwitch}
+        </div>
         <div className="flex items-center gap-2">
           {hasResults && (
             <button onClick={exportRows} className="flex items-center gap-1.5 rounded-full border border-studio-border px-3 py-1.5 text-xs text-studio-text hover:bg-studio-hover">
